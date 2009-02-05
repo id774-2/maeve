@@ -1,0 +1,11 @@
+break user_main_entity0
+# ignore 1 4
+run
+# echo "1st"
+# logstepi
+# echo "2st"
+# logstepi
+# echo "3th"
+
+#(dotimes (i 1000)
+#  (print "logstepi"))

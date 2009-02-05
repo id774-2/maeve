@@ -1,0 +1,3 @@
+#!/bin/sh
+IFS=" "
+gosh -A `pwd`/.. user-driver.scm $*
