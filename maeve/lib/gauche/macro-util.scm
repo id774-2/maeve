@@ -9,6 +9,23 @@
 
 (select-module maeve.lib.gauche.macro-util)
 
+(define-macro (case/equal obj . clauses)
+  (let1 x (gensym)
+    `(let ((,x ,obj))
+       (cond
+	,@(map
+	   (lambda (c)
+	     (match
+	      c
+	      (((objs ...) . es)
+	       `((or ,@(map (lambda (y) `(equal? ,x ',y)) objs))
+		 ,@es))
+	      (('else . _) c)
+	      (else
+	       (error "malformed case/equal"
+		      `(case/equal ,obj ,@clauses)))))
+	   clauses)))))
+
 (define-macro (case/pred obj . clauses)
   (let1 x (gensym)
     `(let ((,x ,obj))
@@ -121,9 +138,6 @@
 (define-macro (r2let1    name x . body)
   `(let ((,name ,x)) ,@body
 	(values ,name ,name)))
-
-(define (symbol-append . rest)
-  (string->symbol (string-join (map x->string rest) "")))
 
 (define (gensyms spec)
   (cond

@@ -14,6 +14,8 @@
 			  (set! (result 0) (misc-immidate #f)))))
 (define (unsafe:zero? n) (unsafe:= n 0))
 (define (print-as-decimal n) (il (call-c-function printf "%d\n" n)))
+(define (display-string s) (il (call-c-function printf "%s" s)))
+(define (print-string s) (il (call-c-function printf "%s\n" s)))
 (define (false?   x) (unsafe:= x (il (misc-immidate #f))))
 (define (true?    x) (unsafe:= x (il (misc-immidate #t))))
 (define (null?    x) (unsafe:= x (il (misc-immidate ()))))
@@ -36,6 +38,8 @@
 (define = unsafe:=)
 (define zero? unsafe:zero?)
 
-(export = - + * < print-as-decimal zero?
+(export = - + * < zero?
 	false? true? null? eof? undef? unbound?
-	false  true  null  eof  undef  unbound)
+	false  true  null  eof  undef  unbound
+	print-as-decimal display-string print-string
+	)

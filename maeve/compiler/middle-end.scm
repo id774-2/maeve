@@ -125,7 +125,7 @@
 	(lambda (v e body) `(let ((,v ,e)) ,body))
 	(add-begin (cons body more))
 	vs es))
-      (('let1 v e b) `(let ((,v ,e)) ,body))
+      (('let1 v e . b) `(let ((,v ,e)) ,@b))
       (cp:def
        handler:set!
        (('set! dist src) `(set!-values (,dist) ,src)))
@@ -186,7 +186,7 @@
 	 handler:gas-form
 	 (('gas-form . form)
 	  (make-foreign-code
-	   :name "gas"
+	   :name (string-copy "gas")
 	   :code `(,@(match-map-tree-pre-order2
 		      (target form)
 		      (handler
@@ -446,6 +446,30 @@
 	    (get-optional opt-orig-block '())))
 	  others)
 	 (for-each record-block blocks)))))
+   (extra-code:clause
+    (define (process-set!-expr src update0 update1)
+      (define expr/val?
+	(any-pred value-element? call? vls? opr2? opr1? block-addr?))
+      (case/pred
+       src
+       (expr/val? (*update!*))
+       (with-mod?
+	(loop-s
+	 (let loop ((s src))
+	   (if (with-mod? s)
+	     (with-mod:set-body! (loop s))
+	     (set!-vls:set-src! *self* s)))))
+       (((any-pred set!-vls? foreign-code? sel-mod?))
+	(make-seq
+	 :es (list (loop-s src) (update0))))
+       ((block? seq?)
+	((if (block? src)
+	   block:es-append-post!
+	   (lambda (x y) (update! (seq:es-of x) (cut append <> y))))
+	 src
+	 (list (update1)))
+	(loop-s src))
+       (else (error "context-fault : set!-vls or set! src :" *self*)))))
    (handler
     (block
      (let1 fes (map loop-s (seqflat-all es))
@@ -502,33 +526,24 @@
      (*update!* :es (if in-lmd?
 		      (normalize:block&others (map loop-s es))
 		      (map loop-s es))))
-    (set!-vls
-     (define expr/val? (any-pred value-element? call? vls? opr2? opr1?))
-     (case/pred
+    (set!
+     (process-set!-expr
       src
-      (expr/val? (*update!*))
-      (with-mod?
-       (loop-s
-	(let loop ((s src))
-	  (if (with-mod? s)
-	    (with-mod:set-body! (loop s))
-	    (set!-vls:set-src! *self* s)))))
-      (((any-pred set!-vls? foreign-code? sel-mod?))
-       (make-seq
-	:es (list (loop-s src) (*update!* :src (make-misc-const 'undef)))))
-      ((block? seq?)
-       ((if (block? src)
-	  block:es-append-post!
-	  (lambda (x y) (update! (seq:es-of x) (cut append <> y))))
-	src
-	(list
-	 (*update!*
-	  :src (make-vls
-		:es (map1-with-index
-		     (lambda (i _) (make-result :num i))
-		     dists)))))
-       (loop-s src))
-      (else (error "context-fault : set!-vls src :" src))))))
+      (cut *update!* :src (make-misc-const 'undef))
+      (lambda ()
+	(*update!*
+	 :src (make-result :num 0)))))
+    (set!-vls
+     (process-set!-expr
+      src
+      (cut *update!* :src (make-misc-const 'undef))
+      (lambda ()
+	(*update!*
+	 :src (make-vls
+	       :es
+	       (map1-with-index
+		(lambda (i _) (make-result :num i))
+		dists))))))))
   (when-debug
    (when require-graphviz?
      (il->graphviz* #`",|require-graphviz?|-2" e)))

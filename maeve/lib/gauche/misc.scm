@@ -3,11 +3,20 @@
   (use srfi-42)
   (use maeve.lib.gauche.macro-util)
   (use gauche.collection)
+  (use maeve.lib.gauche.ultra-iterator)
   (export-all))
 
 (select-module maeve.lib.gauche.misc)
 
+(define symbol-append
+  (with-module maeve.lib.gauche.ultra-iterator symbol-append))
 (define (keyword->symbol k) (string->symbol (keyword->string k)))
+(define (symbol-join xs . rest)
+  (string->symbol
+   (apply string-join (map x->string xs) rest)))
+(define x->symbol (compose string->symbol x->string))
+
+(define (xor a b) (if a (not b) b))
 
 (mac
  `(begin
@@ -30,15 +39,6 @@
 		       . xs)
 		(list-ref xs ,i #f))))
 	r)))
-
-(define (symbol-append . rest)
-  (string->symbol (string-join (map x->string rest) "")))
-
-(define (symbol-join xs . rest)
-  (string->symbol
-   (apply string-join (map x->string xs) rest)))
-
-(define x->symbol (compose string->symbol x->string))
 
 (define gennum (let1 c -1 (lambda () (inc! c))))
 

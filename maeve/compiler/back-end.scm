@@ -347,9 +347,9 @@
   (define data-code '())
   (define code-assert
     (case (arch)
-      ((x86) ".code32\n")
+      ((x86-32) ".code32\n")
       ((x86-64) "")
-      (else (error "Unknown arch :" arch))))
+      (else (error "Unknown arch :" (arch)))))
   (define sp #`"%,(stack-pointer)")
   (define fp #`"%,(frame-pointer)")
   (define-values (insn-suffix var-directive)
@@ -377,7 +377,7 @@
 	(define-values
 	  (cmp->jmp jmp-oprs)
 	  (let1 xs
-	      '((#f . jmp) (= . je) (< . jg) (> . jl) (<= . jle) (>= . jge))
+	      '((#f . jmp) (= . je) (< . jl) (> . jg) (<= . jge) (>= . jle))
 	    (values (alist->hash-table xs 'eq?) (map cdr xs)))))
        (extra-code:clause
 	(define (loop:inherit-lsm s)
@@ -418,11 +418,11 @@
 	(cunit
 	 (list
 	  (when entry-point
-	    (list ".globl main\nmain:\npush %rbp\n"
+	    (list ".globl main\nmain:\n"
 		  (when init-point
 		    (%make-jmp 'call (make-mem :base init-point)))
 		  (%make-jmp 'call (make-mem :base entry-point))
-		  "pop %rbp\nretq\n"))
+		  (insn*: "ret")))
 	  ;; 	    (map
 	  ;; 	     (lambda (gv) (list ".globl " (loop:jump-lsm gv) "\n"))
 	  ;; 	     exported-gvars)
@@ -576,15 +576,7 @@
 	 (case type
 	   ((sp) sp) ((fp) fp)
 	   (else (error "Unknown svar type :" type))))))
-    (list*
-     code-assert
-     ".data\n"
-     data-code
-     "\ndump_registers_format: .asciz \"eax:%08x ebx:%08x ecx:%08x edx:%08x edi:%08x esi:%08x ebp:%08x esp:%08x\\n\"\n"
-     "display_dec_format: .asciz \"%d\\n\"\n"
-     ".text\n"
-     text-code
-     "\n")))
+    (list code-assert "\n.data\n" data-code "\n.text\n" text-code "\n")))
 
 ;;     (seq (map loop-s es))
 ;;     (label name)

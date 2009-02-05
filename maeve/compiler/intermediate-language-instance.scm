@@ -192,6 +192,16 @@
      :default-succ (block:default-succ-of src)))
   dist)
 
+(define (%make-block es . rest-succ)
+  (let-optionals* rest-succ
+      ((ds #f) (t #f) (os #f))
+    (when (xor t os)
+      (error "%make-block : mallformed spec " `(%make-block ,es ,@rest-succ)))
+    (make-block
+     :es (if (list? es) es (list es)) :test t
+     :default-succ (and ds (%make-block-addr ds))
+     :opt-succ (and os (%make-block-addr os)))))
+
 (define (%make-block-addr block-or-id)
   (make-block-addr
    :name (case/pred
@@ -231,7 +241,7 @@
 	 `((define (,pret r . rest)
 	     (apply pretty-print (,trans r) rest)
 	     r)
-	   (define-macro (,(symbol-append "debug:" pret) tag r . rest)
+	   (define-macro (,(string->symbol #`"debug:,pret") tag r . rest)
 	     `(let1 n (inc! *dprint-counter*)
 		(format #t "** start : ~a ~a\n" ,tag n)
 		(rlet1 r ,r
@@ -306,7 +316,7 @@
 (define (rregister->regnum x)
   (cond
    ((vector-index (pa$ eq? x) (registers)) => identity)
-   (else (error "real register ~s does not exists in ~s." x (registers)))))
+   (else (errorf "real register ~s does not exists in ~s." x (registers)))))
 
 (set!
  x86-64:make-call-c-function
@@ -316,6 +326,17 @@
 				 (lambda (x)
 				   `(register ,(rregister->regnum x)))
 				 '(rdi rsi rdx rcx r8 r9)))
+     (ili:with-register-save
+      `((dec! (svar sp) ,m)
+	,prepare-args
+	(set! (register 0) 0)
+	(gas-form ,#`"call ,|func|\n")
+	(inc! (svar sp) ,m))))))
+
+(set!
+ x86-32:make-call-c-function
+ (lambda (func args)
+   (receive (m prepare-args _) (ili:multi-push/pop args)
      (ili:with-register-save
       `((dec! (svar sp) ,m)
 	,prepare-args

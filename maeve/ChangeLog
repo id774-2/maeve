@@ -1,0 +1,10 @@
+2008-11-12 Theoria Laevateinn <theoria@inter7.jp>
+	
+	* release version 0 release 1
+	* arch supported x86-32 (called "i386", "IA-32 32bit" ...)
+	* example/fib.scm newfile that compute Fibonacci number
+
+2008-11-10 Theoria Laevateinn <theoria@inter7.jp>
+
+	* arch only x86-64 (called "amd64", "IA-32 64bit" ...)
+	* release version 0 release 0

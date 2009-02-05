@@ -3,9 +3,12 @@
   (use srfi-1)
   (use srfi-11)
   (use srfi-13)
+  (use srfi-42)
   (use gauche.sequence)
-  (use maeve.lib.gauche.macro-util)
-  (export ultra-iterator))
+  (export ultra-iterator symbol-append
+	  make-bit-vector bit-vector-set* bit-vector-set
+	  bit-vector-reset bit-vector-null? bit-vector-next
+	  bit-vector-intersection bit-vector-union bit-vector-pp))
 (select-module maeve.lib.gauche.ultra-iterator)
 
 (define-macro (insert-code* x y) `(if ,x (list ,y) '()))
@@ -16,7 +19,23 @@
 ;; missing fold-option (left?)
 ;; missing map-option (split?)
 ;; missing for-each-option ()
-;; missing i/o-type (integer? bit-vector? hash-table?)
+;; missing i/o-type (integer? hash-table?)
+
+(define (make-bit-vector size) (expt 2 size))
+(define (bit-vector-set*  vec idx v) (copy-bit idx vec  v))
+(define (bit-vector-set   vec idx)   (copy-bit idx vec #t))
+(define (bit-vector-reset vec idx)   (copy-bit idx vec #f))
+(define (bit-vector-null? n) (= 1 n))
+(define (bit-vector-next  n)
+  (values (logand 1 n) (ash n -1)))
+(define bit-vector-intersection logand)
+(define bit-vector-union logior)
+(define (bit-vector-pp x)
+  (format #t "#,(bit-vector ~b)\n" x)
+  x)
+
+(define (symbol-append . rest)
+  (string->symbol (string-join (map x->string rest) "")))
 
 (define-macro (with-gensyms vs . es)
   `(let ,(map (cut list <> '(gensym)) vs) ,@es))
@@ -90,9 +109,10 @@
 
 (define class? (cut is-a? <> <class>))
 
-(define *specs* '(escape? filter? index? append? kv? introspection? dict?))
+(define *specs* '(escape? filter? index? append? kv? introspection? dict
+			  bit-vector))
 (define-macro (let-decompose-spec options . es)
-  `(let-keywords+ ,options ,#?=(map (cut list <> #f) *specs*) ,@es))
+  `(let-keywords+ ,options ,(map (cut list <> #f) *specs*) ,@es))
 
 (define-macro (parse-input idx options)
   (define local-spec (cut symbol-append "%" <>))
@@ -111,53 +131,78 @@
 		 (else (set! ,gs (list ,ls ,gs))))))
 	   *specs* local-specs)))
 
-(define-macro (ultra-iterator options output-types proc fold-seeds . inputs)
+(define-macro (ultra-iterator options output-specs proc fold-seeds . input-specs)
   (define (require-component? i x?)
     (cond
-     ((integer? x?) (= x? i))
+     ((integer? x?) (= i x?))
      ((pair? x?) (memv i x?))
      (else x?)))
+  (define (err:output-spec os)
+    (error "Bad output spec :" os))
   (let-decompose-spec
    options
    (update!
-    inputs
+    input-specs
     (pa$ map-with-index
 	 (lambda (i e)
 	   (if (and (pair? e) (keyword? (car e)))
 	     (begin
 	       (parse-input
-		i (if (eqv? :top (car e))
-		    (cddr e) `(,(car e) ,i ,@(cddr e))))
-	       (cadr e))
-	     e))))
+		i (case (car e)
+		    ((:top) (cddr e))
+		    ((:extend) (cddr e))
+		    (else `(,(car e) ,i ,@(cddr e)))))
+	       (cons (car e) (cadr e)))
+	     (cons :top e)))))
+   (update!
+    output-specs
+    (map$
+     (lambda (x)
+       (cond
+	((eval x (current-module))
+	 (any-pred procedure? class? keyword?)
+	 => identity)
+	(else (err:output-spec x))))))
    (let*-values
-       (((output-specs)
-	 (map
-	  (lambda (x)
-	    (cond
-	     ((eval x (current-module))
-	      (any-pred procedure? class?)
-	      => identity)
-	     (else
-	      (error "invalid output spec :" x))))
-	  output-types))
-	((rexpr0) (list 'begin))
+       (((rexpr0) (list 'begin))
 	((qexpr0) (list 'begin))
 	((end?s nexts rexpr)
 	 (fold-right3-with-index
 	  (lambda (_ input end?s nexts rexpr)
-	    (with-gensyms
-	     (end?-k next-k)
-	     (values
-	      (cons end?-k end?s)
-	      (cons next-k nexts)
-	      `(,call-with-iterator ,input
-		 (lambda (,end?-k ,next-k) ,rexpr)))))
-	  '() '() rexpr0 inputs))
+	    (define (r end? next rexpr)
+	      (values
+	       (cons end? end?s)
+	       (cons next nexts) rexpr))
+	    (define (err) (error "Bad input spec :" input))
+	    (case (car input)
+	      ((:extend)
+	       (cond
+		((eval (cdr input) (current-module))
+		 procedure? =>
+		 (lambda (gen)
+		   (receive (e n rexpr) (gen rexpr) (r e n rexpr))))
+		(else (err))))
+	      ((:bit-vector)
+	       (with-gensyms
+		(n r1 n1)
+		(r `(cut bit-vector-null? ,n)
+		   `(lambda ()
+		      (receive (,r1 ,n1) (bit-vector-next ,n)
+			(set! ,n ,n1)
+			,r1))
+		   `(let ((,n ,(cdr input))) ,rexpr))))
+	      (else
+	       (with-gensyms
+		(end?-k next-k)
+		(r end?-k next-k
+		   `(,call-with-iterator ,(cdr input)
+		      (lambda (,end?-k ,next-k) ,rexpr)))))))
+	  '() '() rexpr0 input-specs))
 	((add!s gets qexpr)
 	 (let1 len (length output-specs)
 	   (fold-right3-with-index
 	    (lambda (idx os add!s gets qexpr)
+	      (define (err) (error "Bad output spec :" os))
 	      (define (r add! get nqexpr)
 		(values
 		 (cons
@@ -175,8 +220,18 @@
 	       ((procedure? os)
 		(receive (add! get qexpr) (os qexpr)
 		  (r add! get qexpr)))
-	       (else
-		(error "Bad output spec :" os))))
+	       ((keyword? os)
+		(case os
+		  ((:bit-vector)
+		   (let ((n 0) (idx 0))
+		     (r (lambda (x)
+			  (update! n (cut bit-vector-set* <> idx x))
+			  (inc! idx))
+			(lambda ()
+			  (bit-vector-union (make-bit-vector idx) n))
+			qexpr)))
+		  (else (err:output-spec os))))
+	       (else (err:output-spec os))))
 	    '() '() qexpr0 output-specs))))
      (set-cdr! rexpr0 `(,qexpr))
      (let* ((make-args-outers '())
@@ -187,7 +242,7 @@
 		       (cond
 			((require-component? i kv?)
 			 `((,n) (,n)))
-			((require-component? i dict?)
+			((require-component? i dict)
 			 (with-gensyms
 			  (a b)
 			  (push! make-args-outers
@@ -246,46 +301,45 @@
 
 ;; Example
 
-(select-module user)
+;; (select-module user)
 
-(use util.list)
-(use maeve.lib.gauche.macro-util)
-(import maeve.lib.gauche.ultra-iterator)
+;; (use util.list)
+;; (use maeve.lib.gauche.macro-util)
+;; (import maeve.lib.gauche.ultra-iterator)
 
-(define write/ss/nl (cut format/ss #t "~s\n" <>))
 
-(let ((ht0 (alist->hash-table
-	    '((i 5) (j 6) (k 7) (l 8) (m 9))
-	    'eqv?))
-      (ht1 (alist->hash-table
-	    '((5 i) (6 j) (7 k) (8 l) (9 m))
-	    'eqv?)))
-  (receive xs
-      (macro-debug
-       (ultra-iterator
-	(:introspection?-escape?-index? #t :kv? (0 2))
-	(<list> <vector>
-		(let1 n 0
-		  (lambda (e)
-		    (values (lambda (x) (inc! n x))
-			    (lambda () n)
-			    e))))
-	(lambda (idx esc head? tail? k0 v0 num k1 v1 ht0-val ht1-k ht1-v prev _)
-	  (write/ss/nl (list idx head? tail? k0 v0 num k1 
-			     v1 ht0-val ht1-k ht1-v))
-	  ;; (when (= 9 num) (esc))
-	  (values (and (odd?  num) (list k1 v0 k0 v1))
-		  (and (even? idx) num)
-		  idx
-		  `((,k0 ,k1) ,@prev)
-		  (odd? idx)))
-	('() #f)
-	(:top "abcdefghijklmn" :append? #t :filter? #t)
-	'(9 8 7 6 5 4 3 2 1 0)
-	'#(z y x w v u t s r q p o n m l k j i h g f e d c b a)
-	ht0 (:dict? ht1)))
-    (newline)
-    (for-each write/ss/nl xs)))
+;; (let ((ht0 (alist->hash-table
+;; 	    '((i 5) (j 6) (k 7) (l 8) (m 9))
+;; 	    'eqv?))
+;;       (ht1 (alist->hash-table
+;; 	    '((5 i) (6 j) (7 k) (8 l) (9 m))
+;; 	    'eqv?)))
+;;   (receive xs
+;;       (macro-debug
+;;        (ultra-iterator
+;; 	(:introspection?-escape?-index? #t :kv? (0 2))
+;; 	(<list> <vector>
+;; 		(let1 n 0
+;; 		  (lambda (e)
+;; 		    (values (lambda (x) (inc! n x))
+;; 			    (lambda () n)
+;; 			    e))))
+;; 	(lambda (idx esc head? tail? k0 v0 num k1 v1 ht0-val ht1-k ht1-v prev _)
+;; 	  (write/ss/nl (list idx head? tail? k0 v0 num k1 
+;; 			     v1 ht0-val ht1-k ht1-v))
+;; 	  ;; (when (= 9 num) (esc))
+;; 	  (values (and (odd?  num) (list k1 v0 k0 v1))
+;; 		  (and (even? idx) num)
+;; 		  idx
+;; 		  `((,k0 ,k1) ,@prev)
+;; 		  (odd? idx)))
+;; 	('() #f)
+;; 	(:top "abcdefghijklmn" :append? #t :filter? #t)
+;; 	'(9 8 7 6 5 4 3 2 1 0)
+;; 	'#(z y x w v u t s r q p o n m l k j i h g f e d c b a)
+;; 	ht0 (:dict ht1)))
+;;     (newline)
+;;     (for-each write/ss/nl xs)))
 
 ;;  outputs :
 
@@ -302,3 +356,56 @@
 ;; 21
 ;; ((#\m n) (#\k p) (#\i r) (#\g t) (#\e v) (#\c x) (#\a z))
 ;; #f
+
+;; (bit-vector-pp
+;;  (macro-debug
+;;   (ultra-iterator
+;;    ()
+;;    ((let ((n 0) (idx 0))
+;;       (lambda (e)
+;; 	(values
+;; 	 (lambda (x)
+;; 	   (update! n (cut copy-bit idx <> x))
+;; 	   (inc! idx))
+;; 	 (lambda ()
+;; 	   (logior (expt 2 idx) n))
+;; 	 e))))
+;;    (lambda (i) (zero? i))
+;;    ()
+;;    (:extend
+;;     (let1 y #b10101100111000
+;;       (lambda ()
+;; 	(values
+;; 	 (cut = 1 y)
+;; 	 (lambda ()
+;; 	   (begin0
+;; 	     (logand 1 y)
+;; 	     (set! y (ash y -1)))))))))))
+
+
+;; (define write/ss/nl (cut format/ss #t "~s\n" <>))
+
+;; (bit-vector-pp
+;;  (macro-debug
+;;   (ultra-iterator
+;;    ()
+;;    (:bit-vector)
+;;    (lambda (i) (zero? i))
+;;    ()
+;;    (:bit-vector (bit-vector-pp #b10101100111000)))))
+
+
+;; (define (times n x) (list-ec (: i 0 n) x))
+
+;; (define-macro (map-k k proc . xs)
+;;   `(ultra-iterator () ,(times k '<list>) ,proc () ,@xs))
+
+;; (define-macro (fold-k seeds proc . xs)
+;;   `(ultra-iterator () () ,proc ,seeds ,@xs))
+
+;; #?=(fold-k (() 0 1)
+;; 	(lambda (x p0 p1 p2)
+;; 	  (values (cons x p0)
+;; 		  (+ x p1)
+;; 		  (* x p2)))
+;; 	'(1 2 3 4 5))

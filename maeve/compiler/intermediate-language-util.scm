@@ -10,6 +10,7 @@
 	  maeve.lib.gauche.list-util
 	  maeve.lib.gauche.macro-util
 	  maeve.lib.gauche.match-map-tree
+	  maeve.lib.gauche.ultra-iterator
 	  maeve.lib.gauche.complex-iterator
 	  maeve.compiler.arch
 	  maeve.compiler.file-definitions)
