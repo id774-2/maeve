@@ -20,8 +20,6 @@
 
 (debug-print-width 10000000)
 
-(define (identity a) a)
-
 (define (check-and-eval-car ys)
   (eval (car (check-eval-spec ys))
 	(current-module)))
@@ -126,7 +124,8 @@
     ,@body))
 
 (define %traverse-macro-name  '())
-(define %extra-inherited-attr '())
+(define %extra-inherited-attr (make-hash-table 'eq?))
+(define %extra-extra-transformer:traverse (make-hash-table 'eq?))
 
 (define-mmt-handlers
   ifu:safety
@@ -303,10 +302,17 @@
 	     (interslot-specs :default '() :key interslot))
 	    (let-keywords
 	     interslot-specs
-	     ((extra-inherited-attr #f))
+	     ((extra-inherited-attr #f)
+	      (extra-extra-transformer:traverse #f))
 	     (when extra-inherited-attr
-	       (push! %extra-inherited-attr
-		      (cons name extra-inherited-attr))))
+	       (hash-table-put!
+		%extra-inherited-attr
+		name extra-inherited-attr))
+	     (when extra-extra-transformer:traverse
+	       (hash-table-put!
+		%extra-extra-transformer:traverse
+		name 
+		extra-extra-transformer:traverse)))
 	    (cons
 	     name
 	     (map
@@ -338,7 +344,7 @@
 				(if (eq? special-init-value
 					 sp-init-false)
 				  (case struct
-				    ((:list-list :list) '(list))
+				    ((:list-list :list :kv-list) '())
 				    ((:single) #f)
 				    (else (sstruct-error)))
 				  special-init-value)
@@ -379,6 +385,13 @@
 				    ((:list-list)
 				     `(map (cut map ,loop-s <>) ,sname))
 				    ((:list) `(map ,loop-s ,sname))
+				    ((:kv-list)
+				     (with-gensyms
+				      (k v)
+				      `(kv-list-append-map1
+					(lambda (,k ,v)
+					  (list ,k (loop-s ,v)))
+					,sname)))
 				    ((:single) `(,loop-s ,sname))
 				    (else (sstruct-error)))))
 			      (if sloop
@@ -534,16 +547,25 @@
 	  (set! inherited-attr
 		`((*parent-nodes* '() (cons *self* *inherit*))
 		  ,@inherited-attr)))
-	(set! inherited-attr
-	      `(,@(fold
-		   (lambda (s p)
-		     (lset-union
-		      (lambda (a b) (eqv? (car a) (car b)))
-		      p
-		      (assq-ref %extra-inherited-attr s '())))
-		   '()
-		   (hash-table-keys traverse-default-handlers))
-		,@inherited-attr))
+	(let* ((keys (hash-table-keys traverse-default-handlers))
+	       (add-extra-elements
+		(lambda (%append ex)
+		  (apply
+		   %append (map (cut hash-table-get ex <> '()) keys)))))
+	  (set! inherited-attr
+		(append
+		 inherited-attr
+		 (add-extra-elements
+		  (pa$ lset-union
+		       (lambda (a b) (eqv? (car a) (car b))))
+		  %extra-inherited-attr)))
+	  (set! extra-transformer:traverse
+		(append
+		 extra-transformer:traverse
+		 (map (cut eval <> (current-module))
+		      (add-extra-elements
+		       (pa$ lset-union equal?)
+		       %extra-extra-transformer:traverse)))))
 	(let-alist*
 	 update! eq?
 	 ((default-update!-overwrite  :default '() :key *default*))

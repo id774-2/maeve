@@ -31,15 +31,15 @@
 	   xs)))
     (values ys (* (variable-size) n))))
 
-(define (proc-parameter-allocation:register type xs)
-  (let* ((%num-of-regs (num-of-registers))
+(define (%paramalloca-regs xs type regs)
+  (let* ((%num-of-regs (length regs))
 	 (n 0)
 	 (ys
 	  (map1-with-index
 	   (lambda (i _)
 	     (if (> %num-of-regs i)
 	       (case type
-		 ((lmd call) (make-register :num i))
+		 ((lmd call) (make-register :num (pop! regs)))
 		 (else (error "invalid procparam type :" type)))
 	       (begin
 		 (inc! n)
@@ -49,6 +49,18 @@
 		   (else (error "invalid procparam type :" type))))))
 	   xs)))
     (values ys (* (variable-size) n))))
+
+(define (proc-parameter-allocation:x86-64 type xs)
+  (unless (eq? type 'call)
+    (error "proc-parameter-allocation:x86-64 type-error :" type))
+  (%paramalloca-regs 
+   xs type
+   (map rregister->regnum '(rdi rsi rdx rcx r8 r9))))
+
+(define (proc-parameter-allocation:register type xs)
+  (%paramalloca-regs
+   xs type
+   (map rregister->regnum (vector->list (registers)))))
 
 (define (register-allocation:stack paramalloca e)
   (let ((lva-table (make-hash-table 'eq?))

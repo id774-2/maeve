@@ -1,4 +1,11 @@
+2008-12-30 Theoria Laevateinn <theoria@inter7.jp>
+	
+	* release version 0 release 3
+	* lib/maeve/complex-type.scm newfile that support vector and pair types.
+	* example/cpx.scm newfile. It's example for lib/maeve/complex-type.scm.
+
 2008-12-01 Theoria Laevateinn <theoria@inter7.jp>
+	
 	* release version 0 release 2
 	* optimize register allocation is added. 
 	* compiler/data-flow-analysis.scm newfile that support data flow analysis and few its.

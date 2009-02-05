@@ -11,11 +11,8 @@
        (lambda (n)
 	 `(define ,n (make-parameter "parameterized-arch is not installed.")))
        '(variable-size registers num-of-registers special-registers
-		       stack-pointer frame-pointer arch make-call-c-function
+		       stack-pointer frame-pointer arch
 		       make-misc-immidiate))))
-
-(define x86-64:make-call-c-function "make-call-c-function not initialized.")
-(define x86-32:make-call-c-function "make-call-c-function not initialized.")
 
 (define (x86-64:make-misc-immidiate x . opt-default)
   ;; #define SCM__MAKE_ITAG(num)  (((num)<<4) + 6)
@@ -50,7 +47,6 @@
 	 (special-registers '#(rsp rbp))
 	 (stack-pointer 'rsp)
 	 (frame-pointer 'rbp)
-	 (make-call-c-function x86-64:make-call-c-function)
 	 (make-misc-immidiate  x86-64:make-misc-immidiate))
       (thunk))))
 
@@ -65,7 +61,6 @@
 	 (special-registers '#(esp ebp))
 	 (stack-pointer 'esp)
 	 (frame-pointer 'ebp)
-	 (make-call-c-function x86-32:make-call-c-function)
 	 (make-misc-immidiate  x86-64:make-misc-immidiate))
       (thunk))))
 

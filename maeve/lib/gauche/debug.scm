@@ -36,4 +36,11 @@
 	       `((,(car x)) (,(cdr x) #t)))
 	     xs)))))
 
+(define-macro (when-stop tag obj)
+  (let1 x (gensym)
+    `(let ((,x ,tag))
+       (when (equal? ,x stop)
+	 (debug:il:pp ,x ,obj)
+	 (escape #f)))))
+
 (provide "maeve/lib/gauche/debug")

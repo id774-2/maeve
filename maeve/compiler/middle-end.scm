@@ -38,7 +38,7 @@
 	     mmt:default))))))
 
 (define *known-modules* (make-hash-table 'eq?))
-(define *default-module* (make-mod :name 'user :table (make-hash-table 'eq?)))
+(define *default-module* (make-mod :name 'user))
 
 (define (%make-seq xs)
   (if (pair? xs)
@@ -108,7 +108,7 @@
      (else
       (if (pair? default)
 	(car default)
-	(error "maeve-unbound : "s)))))
+	(error "maeve-unbound : " s)))))
   (define (check-const e loop-s)
     (cond ((small-const-type? e) (make-const :v e))
 	  (((any-pred vector? string?) e) (loop-s `(quote ,e)))
@@ -118,8 +118,7 @@
   (copy&paste
    (define (scm:check-internal-macro e)
      (scheme->mir:match
-      e
-      "scheme-syntax-error (internal macro)"
+      e "scheme-syntax-error (internal macro)"
       (('let* (((? symbol? vs) es) ...) body . more)
        (fold-right
 	(lambda (v e body) `(let ((,v ,e)) ,body))
@@ -143,18 +142,19 @@
 	(('dec! dist src) (loop `(set! ,dist (- ,dist ,src))))
 	(cp:ref handler:set!)
 	(else e))))
-   (define (il-interface expr lvar in-lmd?)
-     (let loop ((e expr) (lvar lvar) (in-lmd? in-lmd?))
-       (define loop-s (cut loop <> lvar in-lmd?))
+   (define (il-interface e lvar tail-ctx? in-lmd?)
+     (let loop ((e e) (lvar lvar) (tail-ctx? tail-ctx?) (in-lmd? in-lmd?))
+       (define (loop-s x) (loop x lvar tail-ctx? in-lmd?))
        (scheme->mir:match
 	(il:check-internal-macro e) "intermediate-language-syntax-error"
-	;; S - ARITHMETIC OPERATION
 
 	(('with-vars ((? symbol? vs) ...) . body)
 	 (let1 lvar+ (map (cut %make-lvar <>) vs)
 	   (%make-seq
-	    (map (cut loop <> (append (map cons vs lvar+) lvar) in-lmd?)
+	    (map (cut loop <> (append (map cons vs lvar+) lvar) tail-ctx? in-lmd?)
 		 body))))
+
+	;; S - ARITHMETIC OPERATION
 	(('result i) (make-result :num i))
 	(('register i) (make-register :num i))
 	(((? (cut memq <> '(- + * / < > <= => =)) sym)
@@ -165,6 +165,93 @@
 	 (make-opr1 :opr sym :v (loop-s o1)))
 	;; E - ARITHMETIC OPERATION
 	
+	;; S - TYPE OPERATION
+	(('define-immidiate-types (? symbol? names) ...)
+	 (for-each-with-index
+	  (lambda (i x)
+	    (hash-table-put! (cunit:imm-type->tag-of cunit) x i))
+	  names)
+	 (cunit:imm-type-tag-size-set!
+	  cunit (integer-length (- (length names) 1)))
+	 (make-seq))
+	(('immidiate-ref v . tag?)
+	 (receive (v pre) (normalize:trampoline (loop-s v))
+	   (%make-seq
+	    (append
+	     pre (make-imm-ref :v v :tag-part? (get-optional tag? #f))))))
+	(('define-complex-type (? symbol? name) . slot-defs)
+	 (let* ((uslots '())
+		(gslots
+		 (filter-map
+		  (lambda (sd)
+		    (if (pair? sd)
+		      (and (not (and
+				 (get-keyword :unfixed-size? (cdr sd) #f)
+				 (begin (push! uslots (car sd)) #t)))
+			   (car sd))
+		      sd))
+		  slot-defs)))
+	   (unless (or (null? uslots) (length=1? uslots))
+	     (error "too many unfixed size slot :" uslots))
+	   (hash-table-put!
+	    (mod:type-table-of %current-module) name
+	    (make-def-cpx-type
+	     :name name :unfixed-slot (if (null? uslots) #f (car uslots))
+	     :general-slots gslots)))
+	 (make-seq))
+	(('mem base . offset)
+	 (make-mem :base (loop-s base)
+		   :offset
+		   (and-let* ((i (get-optional offset #f))
+			      (_ (integer? i)))
+		     i)))
+	(('elm-addr base (? symbol? tn) (? symbol? sn) . idx)
+	 (make-elm-addr
+	  :type-name tn :slot-name sn
+	  :base (loop-s base)
+	  :index (cond
+		  ((get-optional idx #f) => loop-s)
+		  (else #f))))
+	(('make-complex-object (? symbol? tn) . (? kv-list? spec))
+	 (decompose-def-cpx-type
+	  (hash-table-get*
+	   (mod:type-table-of %current-module) tn
+	   (error "Unkown complex type name :" tn)))
+	 (let* ((pres '()) (unfixed-size #f)
+		(%v (%make-lvar))
+		(inits
+		 (kv-list-filter-map1
+		  (lambda (k v)
+		    (receive (v pre) (normalize:trampoline (loop-s v))
+		      (push! pres pre)
+		      (case k
+			((:unfixed-size) (set! unfixed-size v) #f)
+			(else
+			 (let1 sk (symbol-append k)
+			   (cond
+			    ((memq sk general-slots)
+			     (make-set!-vls
+			      :src v
+			      :dists
+			      (list (make-mem
+				     :base
+				     (make-elm-addr
+				      :base %v
+				      :type-name tn :slot-name sk)))))
+			    ((eq? sk unfixed-size-slot)
+			     (error "make-complex-type : unfixed-size-slot can't initialize :" sk))
+			    (else
+			     (error "make-complex-type : unkown slot :" sk))))))))
+		  spec)))
+	   (%make-seq
+	    `(,@(flat-1 pres)
+	      ,(make-set!-vls
+		:dists (list %v)
+		:src (make-allocate-cpx
+		      :unfixed-size unfixed-size :type-name tn))
+	      ,@inits ,(make-vls :es (list %v))))))
+	;; E - TYPE OPERATION
+
 	(cp:def
 	 handler:set-values!
 	 (('set!-values dists src)
@@ -174,14 +261,22 @@
 	 (%make-seq (make-if '() (loop-s test) (loop-s then) (loop-s els))))
 	(('seq . es) (%make-seq (map loop-s es)))
 	(('svar (and x (or 'sp 'fp))) (make-svar :type x))
-	(('mem base (? integer? offset))
-	 (make-mem :base (loop-s base) :offset offset))
-
+	
 	(('misc-immidate x) (make-misc-const x))
-	(('call-c-function (? symbol? func) . args)
-	 ;; using parameterized-arch
-	 (loop-s ((make-call-c-function) func args)))
-
+	(('call-c-function (? (any-pred string? symbol?) proc) . args)
+	 (let1 x
+	     (let1 proc #f
+	       (cp:def
+		call-process
+		(receive (p/a pre)
+		    (map2 (compose normalize:trampoline loop-s)
+			  (cons proc args))
+		  (%make-seq
+		   `(,@(flat-1 pre)
+		     ,(make-call :proc (car p/a) :args (cdr p/a)
+				 :tail-ctx? tail-ctx?))))))
+	   (call:slot-set!* x :proc (make-label :foregin? #t :name proc)
+			    :abi (arch))))
 	(cp:def
 	 handler:gas-form
 	 (('gas-form . form)
@@ -218,6 +313,7 @@
 
 	 (cp:ref handler:gas-form)
 	 (cp:ref handler:set-values!)
+
 	 (('values . es)
 	  (receive (es pres)
 	      (map2 (compose normalize:trampoline loop-s) es)
@@ -284,7 +380,7 @@
 	 
 	 ;; S - MODULE
 	 (('define-module (? symbol? name) . exprs)
-	  (let1 mod (make-mod :name name :table (make-hash-table 'eq?))
+	  (let1 mod (make-mod :name name)
 	    (push! (cunit:modules-of cunit) mod)
 	    (hash-table-put! *known-modules* name mod)
 	    (if (null? exprs)
@@ -326,20 +422,13 @@
 
 	 ;; E - MODULE
 
-	 (('il expr) (il-interface expr lvar in-lmd?))
+	 (('il . es) (%make-seq (map (cut il-interface <> lvar tail-ctx? in-lmd?) es)))
 	 
 	 ;; S - CONST
 	 (cp:ref handler:quote)
 
 	 ;; S - FUNCALL & REF VARIABLE
-	 ((proc . args)
-	  (receive (p/a pre)
-	      (map2 (compose normalize:trampoline loop-s)
-		    (cons proc args))
-	    (%make-seq
-	     `(,@(flat-1 pre)
-	       ,(make-call :proc (car p/a) :args (cdr p/a)
-			   :tail-ctx? tail-ctx?)))))
+	 ((proc . args) (cp:ref call-process))
 	 ((? symbol? sym) (fetch-variable sym lvar))
 	 ;; E - FUNCALL & REF VARIABLE
 
@@ -447,21 +536,73 @@
 	  others)
 	 (for-each record-block blocks)))))
    (extra-code:clause
-    (define (process-set!-expr src-of)
+    (define (process-set!-expr dist-of src-of)
+      (define (normalize-dist self)
+	(define pred0 value-element?)
+	(define pred1 (any-pred block? seq?))
+	(define (%update! dist proc)
+	  (update!
+	   (car
+	    (last-pair
+	     ((if (block? dist) block:es-of seq:es-of) dist)))
+	   proc))
+	(let loop ((self self))
+	  (define (err)
+	    (error "context-fault : dist of set!-vls or set! :" self))
+	  (case/pred
+	   self
+	   (set!?
+	    (let1 x (set!:dist-of self)
+	      (cond
+	       ((pred0 x) self)
+	       ((pred1 x)
+		(%update!
+		 x (lambda (x)
+		     (set! (set!:dist-of self) x)
+		     (loop self)))
+		x)
+	       (else (err)))))
+	   (set!-vls?
+	    (let1 x (set!-vls:dists-of self)
+	      (cond
+	       ((every pred0 x) self)
+	       ((find-and-others pred1 x)
+		(lambda (_ x _) x)
+		=> (lambda (pre dist post)
+		     (%update!
+		      dist
+		      (lambda (x)
+			(set! (set!-vls:dists-of self) `(,@pre ,x ,@post))
+			(loop self)))
+		     dist))
+	       (else (err)))))
+	   (else (error "Bad type (normalize-dist) :" self)))))
       (let loop0 ((self *self*))
-	(define (src-set! x) (set! (src-of self) x))
+	(define (src-set! x)
+	  (set! (src-of self) x)
+	  self)
 	(let1 src (src-of self)
 	  (case/pred
 	   src
-	   ((value-element? call? vls? opr2? opr1? block-addr?)
-	    (*update!*))
+	   ((value-element? call? opr2? opr1? block-addr? allocate-cpx? vls?)
+	    (normalize-dist *self*))
+;; 	   (vls?
+;; 	    (make-seq
+;; 	     :es (list (loop-s src)
+;; 		       (src-set!
+;; 			(let1 dist (dist-of self)
+;; 			  (if (pair? dist)
+;; 			    (map-with-index1
+;; 			     (lambda (_ i) (make-result :num i))
+;; 			     dist)
+;; 			    (make-result :num 0)))))))
 	   (with-mod?
 	    (loop-s
 	     (let loop1 ((s src))
 	       (if (with-mod? s)
 		 (with-mod:set-body! s (loop1 (with-mod:body-of s)))
 		 (loop0 (src-set! s))))))
-	   ((set!-vls? foreign-code? sel-mod?)
+	   ((set!-vls? set!? foreign-code? sel-mod?)
 	    (make-seq
 	     :es (list (loop-s src) (src-set! (make-misc-const 'undef)))))
 	   ((block? seq?)
@@ -472,19 +613,26 @@
 		      (last-pair
 		       ((if (block? src) block:es-of seq:es-of) src)))
 		     (lambda (x)
-		       (src-set! x)
-		       (when-debug:normalize
-			(print "process-set!-expr block or seq case 2 :")
-			(il:pp/ss self))
-		       (rlet*-car
-			((z (loop0 self))
-			 (_ (when-debug:normalize
-			     (print "process-set!-expr block or seq case 3 :")
-			     (il:pp/ss z)))))))
-	    (rlet1
-	     x (loop-s src)
-	     (when-debug:normalize
-	      (print "process-set!-expr block or seq case 4 :") (il:pp/ss x))))
+		       (case/pred
+			x
+			((set!-vls? set!? foreign-code? sel-mod?)
+			 (make-seq
+			  :es
+			  (list
+			   x
+			   (loop0
+			    (src-set!
+			     (let1 dist (dist-of self)
+			       (if (pair? dist)
+				 (make-vls
+				  :es
+				  (map-with-index1
+				   (lambda (_ i) (make-result :num i))
+				   dist))
+				 (make-result :num 0))))))))
+			(else
+			 (loop0 (src-set! x))))))
+	    (loop-s src))
 	   (else (error "context-fault : src of set!-vls or set! :" *self*)))))))
    (handler
     (block
@@ -536,14 +684,14 @@
 	(*update!*
 	 :e (loop-s
 	     (if reqinit? 
-	       (make-const :v ((make-misc-immidiate) 'unbound))
+	       (make-misc-const 'unbound)
 	       e)))))
     (seq
      (*update!* :es (if in-lmd?
 		      (normalize:block&others (map loop-s es))
 		      (map loop-s es))))
-    (set!     (process-set!-expr set!:src-of))
-    (set!-vls (process-set!-expr set!-vls:src-of))))
+    (set!     (process-set!-expr set!:dist-of set!:src-of))
+    (set!-vls (process-set!-expr set!-vls:dists-of set!-vls:src-of))))
   (when-debug:flowgraph
    (when require-graphviz?
      (il->graphviz* #`",|require-graphviz?|-2" e)))

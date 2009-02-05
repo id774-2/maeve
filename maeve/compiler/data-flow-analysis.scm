@@ -207,7 +207,7 @@
   (let ((uses '()) (kills '()))
     (mir-traverse
      (target x) (type no-update)
-     (inherited-attr (set-dist? #f set-dist?))
+     (inherited-attr (set-dist? #f #f))
      (handler
       (set! (loop-s src) (*loop* :self dist :set-dist? #t))
       (set!-vls (loop-s src)

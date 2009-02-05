@@ -31,7 +31,8 @@
 	      (begin (set! r #t) #t)))))
     r))
 
-(define (compute-env-overwrite dists srcs make-key make-mov make-tmp copy-tmp ht-type)
+(define (compute-env-overwrite
+	 dists srcs make-key make-mov make-tmp copy-tmp ht-type)
   (let* ((eq-fn (eval ht-type (current-module)))
 	 (memkey (cut member <> <> eq-fn))
 	 (ht (make-hash-table ht-type)) (nneg 0) (npos 0)
@@ -157,6 +158,24 @@
 	 (*update!* :es (append c-defs (map loop-s es)))
 	 (when user-entry-point
 	   (cunit:entry-point-set! *self* user-entry-point)))))
+    (allocate-cpx
+     (decompose-def-cpx-type
+      (hash-table-get*
+       (mod:type-table-of %current-module)
+       type-name (error "Unkown complex type name :" type-name)))
+     (let1 size (make-const :v (* vsize (+ 1 (length general-slots))))
+       (*loop*
+	:use-call-result-seq use-call-result-seq
+	:self (make-call
+	       :abi (arch)
+	       :proc (make-label :name 'malloc
+				 :foregin? #t)
+	       :args
+	       (list
+		(cond
+		 ((and unfixed-slot (loop-s unfixed-size))
+		  => (mcut make-opr2 :opr '+ :v1 size :v2 <>))
+		 (else size)))))))
     (const
      (case/pred
       v
@@ -229,14 +248,20 @@
 	     (lambda (i slv) (and (eqv? #t slv)
 				  (make-register :num i)))
 	     (rlet1
-	      cur
-	      (compute-using-register (cons *self* *parent-nodes*))
+	      cur (compute-using-register (cons *self* *parent-nodes*))
 	      (when-debug:regalloca
 	       (format #t "~s : ~s ~s\n"
 		       (map il:id (cons *self* *parent-nodes*))
 		       (eq-hash cur) cur))))))
-	  ((misc) `(,(make-block-addr :name (il:id cont-block)) ,@save-regs))
-	  ((dists sp+:param) (paramalloca 'call args))
+	  ((misc) (append
+		   (insert-code*
+		    (not abi) (make-block-addr :name (il:id cont-block)))
+		   save-regs))
+	  ((dists sp+:param) ((case abi
+				((x86-32) proc-parameter-allocation:stack)
+				((x86-64) proc-parameter-allocation:x86-64)
+				(else paramalloca))
+			      'call args))
 	  ((sp+:misc) (* vsize (length misc)))
 	  ((misc:push-seq misc:pop-seq)
 	   (filter-map2-with-index
@@ -245,36 +270,35 @@
 	      (values
 	       (%make-set! (ref-stack-by-sp/const (+ i (/ sp+:param vsize)))
 			   src)
-	       (%make-set! src (ref-stack-by-sp/const (- i 1)))))
+	       (%make-set! src (ref-stack-by-sp/const
+				(- i (if (not abi) 1 0))))))
 	    misc)))
-       ;;        (map2-with-index
-       ;; 	(lambda (i s)
-       ;; 	  (values
-       ;; 	   (list s (* 8 (+ i (/ 16 8))))
-       ;; 	   (list s (* 8 (- i 1)))))
-       ;; 	'(r-addr fp r0 r1 rk))
+       ;; (map2-with-index
+       ;;  (lambda (i s)
+       ;;   (values
+       ;;    (list s (* 8 (+ i (/ 16 8))))
+       ;;    (list s (* 8 (- i 1)))))
+       ;;  '(r-addr fp r0 r1 rk))
        ;; ((r-addr 16) (fp 24) (r0 32) (r1 40) (rk 48))
        ;; ((r-addr -8) (fp  0) (r0  8) (r1 16) (rk 24))
-
-
-       (%make-seq
-	(list
-	 (make-block
-	  :default-succ (loop-s proc)
-	  :es (append (stack:alloca (+ sp+:param sp+:misc))
-		      misc:push-seq
-		      (make-set!-sequence dists (map loop-s args))))
-	 (block:es-set!
-	  cont-block
-	  ;; return addr was poped.
-
-	  `(,(cadr misc:pop-seq) ,@use-call-result-seq
-	    ,@(cddr misc:pop-seq)
-	    ,@(stack:free (- sp+:misc vsize)))
-
-	  ;; 	   `(,@(cdr misc:pop-seq) ,@(stack:free (- sp+:misc vsize))
-	  ;; 	     ,@use-call-result-seq)
-	  )))))
+       (let ((pre-seq (append
+		       (stack:alloca (+ sp+:param sp+:misc))
+		       misc:push-seq
+		       (make-set!-sequence dists (map loop-s args))))
+	     (post-seq
+	      ;; return addr was poped.
+	      `(,((if (not abi) cadr car) misc:pop-seq) ,@use-call-result-seq
+		,@((if (not abi) cddr cdr) misc:pop-seq)
+		,@(stack:free (- sp+:misc (if (not abi) vsize 0))))))
+	 (%make-seq
+	  (if abi
+	    `(,@pre-seq
+	      ,(%make-set! (make-register :num 0) (make-const :v 0))
+	      ,(make-foreign-code :name "gas" :code `("call " ,proc))
+	      ,@post-seq)
+	    (list
+	     (make-block :default-succ proc :es pre-seq)
+	     (block:es-set! cont-block post-seq)))))))
     (set!-vls
      (define (make-useq)
        (call-with-values
@@ -288,16 +312,67 @@
        (%make-set! (loop-s (car dists)) (loop-s src)))
       ((vls? foreign-code?)
        (%make-seq (cons (loop-s src) (make-useq))))
-      (call?
+      ((call? allocate-cpx?)
        (*loop* :self src :use-call-result-seq (make-useq)))
       (else
        (error "Unknown set!-vls src type :" src))))
     (vls
      (%make-seq
-      (map1-with-index
-       (lambda (i e) (%make-set! (make-result :num i) (loop-s e)))
-       es)))
-    (lvar (lvar-allocation *parent-nodes* *self*)))))
+      (make-set!-sequence
+       (map1-with-index
+	(lambda (i _) (make-result :num i))
+	es)
+       (map loop-s es))))
+    (lvar (lvar-allocation *parent-nodes* *self*))
+    (mem
+     (case/pred
+      base
+      (elm-addr?
+       (match-let1
+	#(pre base offset) (loop-s base)
+	(%make-seq
+	 `(,@pre ,(*update!* :base base :offset offset)))))
+      (else (*update!*))))
+    (elm-addr
+     (decompose-def-cpx-type
+      (hash-table-get*
+       (mod:type-table-of %current-module) type-name
+       (error "Unkown complex type name :" type-name)))
+     (unless (mem? (car *parent-nodes*))
+       (error "elm-addr context fault" (cons *self* *parent-nodes*)))
+     (let*-values
+	 (((pre) '())
+	  ((base offset)
+	   (cond
+	    ((il? index)
+	     (let ((base (loop-s base))
+		   (tmp (car (compute-temp-space 1))))
+	       (set!
+		pre
+		`(,(%make-set!
+		    tmp
+		    (make-opr2
+		     :opr '* :v2 (loop-s index) :v1 (make-const :v vsize)))
+		  ,@(make-inc*
+		     tmp
+		     (* vsize (length general-slots)))
+		  ,(%make-set!
+		    tmp
+		    (make-opr2 :opr '+ :v2 tmp :v1 base))))
+	       (values tmp #f)))
+	    (else
+	     (values
+	      (loop-s base)
+	      (* vsize
+		 (+ (or index 0)
+		    (cond
+		     ((list-index (pa$ eq? slot-name) general-slots)
+		      => (cut + 1 <>))
+		     ((eq? slot-name 'tag) 0)
+		     (else
+		      (error "Unkown slot name of complex type :"
+			     slot-name type-name))))))))))
+       (vector pre base offset))))))
 
 (define (low-level-code->x86+x86-64 expr)
   (define (vnum->byte x) (* (variable-size) x))
@@ -412,32 +487,34 @@
 	      (begin (push! data-code code) '())
 	      code)))
 	(label
-	    ;; GAS label prefix :
-	    ;;      imm mem
-	    ;; jmp       *
-	    ;; else  $
-	    (list
-	     (when deflabel-value? (list var-directive " "))
-	     (label:
-	      name
-	      (mcut
-	       cond
-	       ((hash-table-get lbl->gas-symbol id #f) => identity)
-	       (else
-		(rlet1
-		 x (with-string-io (x->string name)
-		     (lambda ()
-		       (port-for-each
-			(lambda (c)
-			  (write-char
-			   (if (char-set-contains? #[\w] c)
-			     c #\_)))
-			read-char)))
-		 (hash-table-update!
-		  gas-symbols x
-		  (lambda (n) (update! x (cut list <> n)) (+ 1 n))
-		  0)
-		 (hash-table-put! lbl->gas-symbol id x)))))))
+	 ;; GAS label prefix :
+	 ;;      imm mem
+	 ;; jmp       *
+	 ;; else  $
+	 (list
+	  (when deflabel-value? (list var-directive " "))
+	  (if foregin?
+	    name
+	    (label:
+	     name
+	     (mcut
+	      cond
+	      ((hash-table-get lbl->gas-symbol id #f) => identity)
+	      (else
+	       (rlet1
+		x (with-string-io (x->string name)
+		    (lambda ()
+		      (port-for-each
+		       (lambda (c)
+			 (write-char
+			  (if (char-set-contains? #[\w] c)
+			    c #\_)))
+		       read-char)))
+		(hash-table-update!
+		 gas-symbols x
+		 (lambda (n) (update! x (cut list <> n)) (+ 1 n))
+		 0)
+		(hash-table-put! lbl->gas-symbol id x))))))))
 	(block-addr
 	 (label: #f (lambda () #`"block_,|name|")))
 	(block

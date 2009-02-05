@@ -46,8 +46,13 @@
 	  (definitions :type :general
 	    :special-init-value (make-hash-table 'eqv?)
 	    :interhandler-ref? #t :allow-print? #f)
+	  (imm-type->tag
+	   :interhandler-ref? #t :type :general
+	   :special-init-value (make-hash-table 'eq?))
+	  (imm-type-tag-size :interhandler-ref? #t :type :general)
 	  (es :struct :list
-	      :special-slot-handler (cut seqflat <> loop-s))))
+	      ;;:special-slot-handler (cut seqflat <> loop-s)
+	      )))
   (block (slot
 	  (es :struct :list)
 	  (default-succ :type :il-or-false)
@@ -56,13 +61,11 @@
 	  ;;(succs :struct :list :misc (:check (every$ jump-if?)))
 	  ))
   (block-addr (slot (name :type :general)))
-;;   (jump-if (slot (test :type :il-or-false
-;; 		       :misc (:check (any-pred value-element? opr2?)))
-;; 		 tgt))
   (seq (slot (es :struct :list)))
   (deflabel (slot (lbl :misc (:check label?)) (e :type :il-or-false)
 		  (place :type :general)))
   (label (slot (name :type :general)
+	       (foregin? :type :general)
 	       (module :allow-print? #f :type :il-or-false
 		       :misc (:check module?))))
   (lmd (slot (param :struct :list :misc (:check (every$ lvar?)))
@@ -77,7 +80,8 @@
   (const (slot (v :type :general)))
   (call (slot (proc :misc (:check value-element?))
 	      (args :struct :list :misc (:check (every$ value-element?)))
-	      (tail-ctx? :type :general)))
+	      (tail-ctx? :type :general)
+	      (abi :type :general)))
   (mem (slot (base :misc (:check value-element?))
 	     (offset :type :general)))
   (elt (slot s e))
@@ -99,9 +103,16 @@
     (code :type :general
 	  :special-slot-handler (cut trans-il-in-list loop-s <>))))
   (with-mod
-   #0=(interslot :extra-inherited-attr
-		 ((%current-module #f *inherit*)
-		  (%current-module-table #f *inherit*)))
+   #0=(interslot
+       :extra-extra-transformer:traverse
+       ((lambda (_ c)
+	  `(let ((%current-module #f)
+		 (%current-module-table #f))
+	     ,c)))
+;;        :extra-inherited-attr
+;;        ((%current-module #f *inherit*)
+;; 	(%current-module-table #f *inherit*))
+       )
    (slot (module :misc (:check module?))
 	 (body :special-slot-handler
 	       (lambda (x) (with-mod-for-handler module (loop-s x))))))
@@ -110,18 +121,37 @@
    (slot (module :special-slot-handler
 		 (lambda (x) (sel-mod-for-handler x) (loop-s x))
 		 :misc (:check module?))))
+  (def-cpx-type (slot (name :type :general)
+		      (unfixed-slot :type :general)
+		      (general-slots :type :general)))
+  (elm-addr (slot (type-name :type :general)
+		  (slot-name :type :general)
+		  (index :type :il-or-false)
+		  base))
+  (imm-ref (slot (tag-part? :type :general) v))
+  (allocate-cpx (slot (type-name :type :general)
+		      (unfixed-size :type :il-or-false)))
   (mod
    (slot
     (name  :type :general)
     (imported-modules :struct :list :allow-print? #f)
     (imported-labels :type :general :special-init-value '() :allow-print? #f)
     (exported-labels :type :general :special-init-value '() :allow-print? #f)
-    (table :type :general :allow-print? #f))))
+    (type-table :type :general :special-init-value (make-hash-table 'eq?)
+		    :allow-print? #f)
+    (table :type :general :allow-print? #f
+	   :special-init-value (make-hash-table 'eq?))))
+  (gc-malloc (slot (size :type :general)))
+  )
 
 (require-intermediate-form-util internal-interface)
 
 (define-internal-interface-structs
   ()
+  (compile-result
+   (slot
+    (omn :type :general)
+    (imported-modules :type :general)))
   (register-allocation-result
    (slot
     (compute-using-register
@@ -159,12 +189,13 @@
 	 (p (get-optional proc identity))
 	 (x (append-map1
 	     (lambda (x)
-	       (let1 x (p x)
+	       (let loop ((x (p x)))
 		 (case/pred
 		  x
-		  (seq?
-		   (set! flatted? #t)
-		   (seq:es-of x))
+		  (seq? (set! flatted? #t) (seq:es-of x))
+		  (with-mod?
+		   (let1 xs (loop (with-mod:body-of x))
+		     (if (null? xs) '() x)))
 		  (else (list x)))))
 	     xs)))
     (values x flatted?)))
@@ -331,31 +362,31 @@
    ((vector-index (pa$ eq? x) (registers)) => identity)
    (else (errorf "real register ~s does not exists in ~s." x (registers)))))
 
-(set!
- x86-64:make-call-c-function
- (lambda (func args)
-   (receive (m prepare-args _)
-       (ili:multi-push/pop args (map
-				 (lambda (x)
-				   `(register ,(rregister->regnum x)))
-				 '(rdi rsi rdx rcx r8 r9)))
-     (ili:with-register-save
-      `((dec! (svar sp) ,m)
-	,prepare-args
-	(set! (register 0) 0)
-	(gas-form ,#`"call ,|func|\n")
-	(inc! (svar sp) ,m))))))
+;; (set!
+;;  x86-64:make-call-c-function
+;;  (lambda (func args)
+;;    (receive (m prepare-args _)
+;;        (ili:multi-push/pop args (map
+;; 				 (lambda (x)
+;; 				   `(register ,(rregister->regnum x)))
+;; 				 '(rdi rsi rdx rcx r8 r9)))
+;;      (ili:with-register-save
+;;       `((dec! (svar sp) ,m)
+;; 	,prepare-args
+;; 	(set! (register 0) 0)
+;; 	(gas-form ,#`"call ,|func|\n")
+;; 	(inc! (svar sp) ,m))))))
 
-(set!
- x86-32:make-call-c-function
- (lambda (func args)
-   (receive (m prepare-args _) (ili:multi-push/pop args)
-     (ili:with-register-save
-      `((dec! (svar sp) ,m)
-	,prepare-args
-	(set! (register 0) 0)
-	(gas-form ,#`"call ,|func|\n")
-	(inc! (svar sp) ,m))))))
+;; (set!
+;;  x86-32:make-call-c-function
+;;  (lambda (func args)
+;;    (receive (m prepare-args _) (ili:multi-push/pop args)
+;;      (ili:with-register-save
+;;       `((dec! (svar sp) ,m)
+;; 	,prepare-args
+;; 	(set! (register 0) 0)
+;; 	(gas-form ,#`"call ,|func|\n")
+;; 	(inc! (svar sp) ,m))))))
 
 ;; (use srfi-43)
 

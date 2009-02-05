@@ -100,6 +100,12 @@
 		       (lset-adjoin/save-order eq l e)))
 	'() lsts))
 
+(define (kv-list? xs)
+  (let loop ((xs xs))
+    (or (null? xs)
+	(and (keyword? (car xs)) (pair? (cdr xs))
+	     (loop (cddr xs))))))
+
 (define kv-list-keys   (cut kv-list-map1 (lambda (k _) k) <>))
 (define kv-list-values (cut kv-list-map1 (lambda (_ v) v) <>))
 
