@@ -7,12 +7,14 @@
 
 (define (main args)
   (let-args (cdr args)
-      ((opt:debug?     "d|debug" #f)
+      ((opt:debug?     "d|debug=s" "")
        (opt:dont-link? "S")
        (opt:arch       "a|arch=s" (gauche-architecture))
        (else (option . _)  (error "unrecognized option:" option))
        . input-files)
-    (debug? opt:debug?)
+    (for-each
+     (parse-debug-option)
+     (string-split opt:debug? #[, ]))
     (let ((inputs (append
 		   (directory-list
 		    (build-path (current-directory) "lib" "maeve")

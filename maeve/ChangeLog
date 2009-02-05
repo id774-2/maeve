@@ -1,3 +1,9 @@
+2008-12-01 Theoria Laevateinn <theoria@inter7.jp>
+	* release version 0 release 2
+	* optimize register allocation is added. 
+	* compiler/data-flow-analysis.scm newfile that support data flow analysis and few its.
+	* compiler/register-allocation.scm newfile that support register allocation.
+	
 2008-11-12 Theoria Laevateinn <theoria@inter7.jp>
 	
 	* release version 0 release 1
@@ -6,5 +12,5 @@
 
 2008-11-10 Theoria Laevateinn <theoria@inter7.jp>
 
-	* arch only x86-64 (called "amd64", "IA-32 64bit" ...)
 	* release version 0 release 0
+	* arch only x86-64 (called "amd64", "IA-32 64bit" ...)

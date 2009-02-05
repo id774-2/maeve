@@ -2,64 +2,34 @@
   ;; MIR -> Assembly
   (use maeve.compiler.intermediate-language-util)
   (use maeve.compiler.intermediate-language-instance)
+  (use maeve.compiler.register-allocation)
   (export-all))
 
 (select-module maeve.compiler.back-end)
 
-(define *sp* (make-svar :type 'sp))
-(define *fp* (make-svar :type 'fp))
-
-(define-values (ref-stack-by-sp/const ref-stack-by-fp/const)
-  (let1 gen
-      (lambda (base offset)
-	(unless (integer? offset) (error "mem offset must be ingeter :" offset))
-	(make-mem :base base :offset (* (variable-size) offset)))
-    (values (cut gen *sp* <>) (cut gen *fp* <>))))
-
 (define *user-main-symbol* 'user_main)
 
-(define (proc-parameter-allocation:stack type xs)
-  ;; (num-of-registers)
-  (let* ((n 0)
-	 (ys
-	  (map1-with-index
-	   (lambda (i _)
-	     (inc! n)
-	     (case type
-	       ((lmd)  (ref-stack-by-fp/const i))
-	       ((call) (ref-stack-by-sp/const i))
-	       (else (error "invalid procparam type :" type))))
-	   xs)))
-    (values ys (* (variable-size) n))))
+(define-values (make-inc* make-dec*)
+  (let1 mk
+      (lambda (opr d s)
+	(insert-code*
+	 (not (zero? s))
+	 (make-set!
+	  :dist d
+	  :src (make-opr2 :opr opr :v1 d :v2 (make-const :v s)))))
+    (values (cut mk '+ <> <>) (cut mk '- <> <>))))
 
-(define (register-allocation-with-no-register paramalloca e)
-  (let ((lva-table (make-hash-table 'eq?))
-	(cur-table (make-hash-table 'eq?)))
-    (define cur-default (make-vector (num-of-registers) #f))
-    (mir-traverse
-     (target e)
-     (type no-update)
-     (handler
-      (lmd
-       (let-values (((vec) (vector-copy cur-default))
-		    ((dists arg-size) (paramalloca 'lmd param)))
-	 (for-each
-	  (lambda (lv e)
-	    (hash-table-put! lva-table lv e)
-	    (when (register? e)
-	      (vector-set! vec (register:num-of e) #t)))
-	  param dists)
-	 (hash-table-put! cur-table *self* vec)
-	 (for-each-with-index
-	  (lambda (i lv)
-	    (hash-table-put!
-	     lva-table lv (ref-stack-by-fp/const (- (+ 1 i)))))
-	  local-vars)))))
-    (when-debug (hash-table-dump lva-table))
-    (make-register-allocation-result
-     :compute-using-register
-     (lambda (xs) (hash-table-get cur-table (find lmd? xs) cur-default))
-     :lvar-allocation (lambda (_ lv) (hash-table-get lva-table lv)))))
+(define stack:free   (cut make-inc* *sp* <>))
+(define stack:alloca (cut make-dec* *sp* <>))
+
+(define (vector-memq obj vec)
+  (let ((end (vector-length vec)) (r #f))
+    (do ((i 0 (+ i 1)))
+	((or (>= i end)
+	     (and
+	      (eq? obj (vector-ref vec i))
+	      (begin (set! r #t) #t)))))
+    r))
 
 (define (compute-env-overwrite dists srcs make-key make-mov make-tmp copy-tmp ht-type)
   (let* ((eq-fn (eval ht-type (current-module)))
@@ -102,30 +72,6 @@
        dists dist-keys srcs src-keys)
       (append (reverse! s1) (reverse! s2) (reverse! s3)))))
 
-(define-values (make-inc* make-dec*)
-  (let1 mk
-      (lambda (opr d s)
-	(insert-code*
-	 (not (zero? s))
-	 (make-set!
-	  :dist d
-	  :src (make-opr2 :opr opr :v1 d :v2 (make-const :v s)))))
-    (values (cut mk '+ <> <>) (cut mk '- <> <>))))
-
-(define stack:free   (cut make-inc* *sp* <>))
-(define stack:alloca (cut make-dec* *sp* <>))
-
-
-
-(define (vector-memq obj vec)
-  (let ((end (vector-length vec)) (r #f))
-    (do ((i 0 (+ i 1)))
-	((or (>= i end)
-	     (and
-	      (eq? obj (vector-ref vec i))
-	      (begin (set! r #t) #t)))))
-    r))
-
 (define (change-syntax-level:medium->low regalloca paramalloca e)
   (define vsize (variable-size))
   (define (%make-seq x) (if (length=1? x) (car x) (make-seq :es x)))
@@ -147,7 +93,8 @@
 	      (unless (proc i (vector-ref vec i))
 		(loop (+ i 1)))))))
       (let ((dead-reg '()) (rc 0)
-	    (using (compute-using-register *parent-nodes*)))
+	    (using (vector-copy
+		    (compute-using-register (cons *self* *parent-nodes*)))))
 	(for-each
 	 (lambda (i) (vector-set! using i #t))
 	 (get-optional opt-no-reglst '()))
@@ -191,10 +138,10 @@
 	    (filter-map1
 	     (lambda (x)
 	       (cond
-		((and (register? x) (register:type-of x))
-		 number? => identity)
+		((and (register? x) (register:num-of x)) number? => identity)
 		(else #f)))
-	     dists))
+	     dists)
+	    )
 	 (lambda () (pop! tmps)))
        identity 'equal?)))
    (handler
@@ -279,8 +226,15 @@
 	   (cons
 	    *fp*
 	    (vector-filter-map1->list-with-index
-	     (lambda (i slv) (and slv (make-register :num i)))
-	     (compute-using-register *parent-nodes*))))
+	     (lambda (i slv) (and (eqv? #t slv)
+				  (make-register :num i)))
+	     (rlet1
+	      cur
+	      (compute-using-register (cons *self* *parent-nodes*))
+	      (when-debug:regalloca
+	       (format #t "~s : ~s ~s\n"
+		       (map il:id (cons *self* *parent-nodes*))
+		       (eq-hash cur) cur))))))
 	  ((misc) `(,(make-block-addr :name (il:id cont-block)) ,@save-regs))
 	  ((dists sp+:param) (paramalloca 'call args))
 	  ((sp+:misc) (* vsize (length misc)))
@@ -312,10 +266,15 @@
 		      (make-set!-sequence dists (map loop-s args))))
 	 (block:es-set!
 	  cont-block
-	  `(,(cadr misc:pop-seq) ,@(stack:free (- sp+:misc vsize))
-	    ,@use-call-result-seq
-	    ;; return addr was poped.
-	    ,@(cddr misc:pop-seq)))))))
+	  ;; return addr was poped.
+
+	  `(,(cadr misc:pop-seq) ,@use-call-result-seq
+	    ,@(cddr misc:pop-seq)
+	    ,@(stack:free (- sp+:misc vsize)))
+
+	  ;; 	   `(,@(cdr misc:pop-seq) ,@(stack:free (- sp+:misc vsize))
+	  ;; 	     ,@use-call-result-seq)
+	  )))))
     (set!-vls
      (define (make-useq)
        (call-with-values

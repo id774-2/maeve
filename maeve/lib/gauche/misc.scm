@@ -145,7 +145,8 @@
        (if (eq? src dist)
 	 (lambda _ (proc k v))
 	 (cut proc k v <>))
-       default)))))
+       default))))
+  src)
 
 (define (hash-table-copy ht)
   (rlet1

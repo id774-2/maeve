@@ -447,29 +447,45 @@
 	  others)
 	 (for-each record-block blocks)))))
    (extra-code:clause
-    (define (process-set!-expr src update0 update1)
-      (define expr/val?
-	(any-pred value-element? call? vls? opr2? opr1? block-addr?))
-      (case/pred
-       src
-       (expr/val? (*update!*))
-       (with-mod?
-	(loop-s
-	 (let loop ((s src))
-	   (if (with-mod? s)
-	     (with-mod:set-body! (loop s))
-	     (set!-vls:set-src! *self* s)))))
-       (((any-pred set!-vls? foreign-code? sel-mod?))
-	(make-seq
-	 :es (list (loop-s src) (update0))))
-       ((block? seq?)
-	((if (block? src)
-	   block:es-append-post!
-	   (lambda (x y) (update! (seq:es-of x) (cut append <> y))))
-	 src
-	 (list (update1)))
-	(loop-s src))
-       (else (error "context-fault : set!-vls or set! src :" *self*)))))
+    (define (process-set!-expr src-of)
+      (let loop0 ((self *self*))
+	(define (src-set! x) (set! (src-of self) x))
+	(let1 src (src-of self)
+	  (case/pred
+	   src
+	   ((value-element? call? vls? opr2? opr1? block-addr?)
+	    (*update!*))
+	   (with-mod?
+	    (loop-s
+	     (let loop1 ((s src))
+	       (if (with-mod? s)
+		 (with-mod:set-body! s (loop1 (with-mod:body-of s)))
+		 (loop0 (src-set! s))))))
+	   ((set!-vls? foreign-code? sel-mod?)
+	    (make-seq
+	     :es (list (loop-s src) (src-set! (make-misc-const 'undef)))))
+	   ((block? seq?)
+	    (when-debug:normalize
+	     (print "process-set!-expr block or seq case 1 :")
+	     (il:pp/ss self))
+	    (update! (car
+		      (last-pair
+		       ((if (block? src) block:es-of seq:es-of) src)))
+		     (lambda (x)
+		       (src-set! x)
+		       (when-debug:normalize
+			(print "process-set!-expr block or seq case 2 :")
+			(il:pp/ss self))
+		       (rlet*-car
+			((z (loop0 self))
+			 (_ (when-debug:normalize
+			     (print "process-set!-expr block or seq case 3 :")
+			     (il:pp/ss z)))))))
+	    (rlet1
+	     x (loop-s src)
+	     (when-debug:normalize
+	      (print "process-set!-expr block or seq case 4 :") (il:pp/ss x))))
+	   (else (error "context-fault : src of set!-vls or set! :" *self*)))))))
    (handler
     (block
      (let1 fes (map loop-s (seqflat-all es))
@@ -526,25 +542,9 @@
      (*update!* :es (if in-lmd?
 		      (normalize:block&others (map loop-s es))
 		      (map loop-s es))))
-    (set!
-     (process-set!-expr
-      src
-      (cut *update!* :src (make-misc-const 'undef))
-      (lambda ()
-	(*update!*
-	 :src (make-result :num 0)))))
-    (set!-vls
-     (process-set!-expr
-      src
-      (cut *update!* :src (make-misc-const 'undef))
-      (lambda ()
-	(*update!*
-	 :src (make-vls
-	       :es
-	       (map1-with-index
-		(lambda (i _) (make-result :num i))
-		dists))))))))
-  (when-debug
+    (set!     (process-set!-expr set!:src-of))
+    (set!-vls (process-set!-expr set!-vls:src-of))))
+  (when-debug:flowgraph
    (when require-graphviz?
      (il->graphviz* #`",|require-graphviz?|-2" e)))
   (let1 get-block (pa$ hash-table-get lbl->block)

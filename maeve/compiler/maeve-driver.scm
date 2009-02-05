@@ -3,6 +3,8 @@
   (use gauche.uvector)
   (use maeve.compiler.intermediate-language-util)
   (use maeve.compiler.intermediate-language-instance)
+  (use maeve.compiler.register-allocation)
+  (use maeve.compiler.data-flow-analysis)
   (use maeve.compiler.middle-end)
   (use maeve.compiler.back-end)
   (export-all))
@@ -41,9 +43,9 @@
 	       (map mod:name-of xs)
 	       "+")))
 	   (else (symbol-append "noname"(hash x)))))
-	 (_ (when-debug (il->graphviz* #`",|omn|-1" x)))
+	 (_ (when-debug:flowgraph (il->graphviz* #`",|omn|-1" x)))
 	 (y (normalize&reduce-graph omn x)))
-    (when-debug (il->graphviz* #`",|omn|-3" y))
+    (when-debug:flowgraph (il->graphviz* #`",|omn|-3" y))
     (with-output-to-mir-file
      omn (pretty-print y :use-global-table? #t))
     omn))
@@ -94,7 +96,44 @@
 	       main-init (make-lmd :es (list (make-block :es %inits))))
 	     ,@(append-map1 cunit:es-of cunits))))
     (when-debug
-     (debug:il:pp/ss "pre compile-2" main-unit))
+     (debug:il:pp "pre compile-2" main-unit))
+    (when-debug ;:ud-chain
+     (let* ((%reach (reach main-unit))
+	    (chain (make-hash-table 'equal?)))
+;;        (hash-table-dump*
+;; 	%reach :pre-key-filter il:id :value-filter
+;; 	(cut hash-table-map
+;; 	     <> (lambda (k v)
+;; 		  (cons (il->sexp/ss k) (map il->sexp/ss v)))))
+       (with-output-to-file "tmp/depend.dot"
+	 (lambda ()
+	   (print "digraph cfg {")
+	   (hash-table-for-each
+	    %reach
+	    (lambda (stm rd)
+	      (hash-table-for-each
+	       rd (lambda (v es)
+		    (for-each
+		     (lambda (e)
+		       (decompose-rd-elm e)
+		       (receive (%use _) (%use&kill src)
+			 (for-each
+			  (lambda (e)
+			    (hash-table-push! chain dist (live-elm:var-of e)))
+			  %use)))
+		     es)))))
+	   (let1 memo (make-hash-table 'equal?)
+	     (hash-table-for-each
+	      chain
+	      (lambda (d ss)
+		(for-each
+		 (lambda (s)
+		   (unless (hash-table-exists? memo (cons s d))
+		     (hash-table-put! memo (cons s d) #t)
+		     (format #t "var_~s -> var_~s;\n"
+			     (il:id s) (il:id d))))
+		 ss))))
+	   (print "}")))))
     (let* ((main-entry-name
 	    (cond
 	     ((mod:name-of*
@@ -107,10 +146,10 @@
 	    (normalize&reduce-graph
 	     #f
 	     (change-syntax-level:medium->low 
-	      register-allocation-with-no-register
-	      proc-parameter-allocation:stack
+	      register-allocation:primitive-approximation
+	      proc-parameter-allocation:register
 	      main-unit)))
-	   (_ (when-debug (debug:il:pp/ss "in compile-2-1" x)))
+	   (_ (when-debug (debug:il:pp "in compile-2-1" x)))
 	   (y (low-level-code->x86+x86-64 x)))
       (call-with-output-asm-file
        main-entry-name (cut %write-tree y <>))

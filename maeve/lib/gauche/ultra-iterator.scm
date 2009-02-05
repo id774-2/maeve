@@ -61,17 +61,6 @@
 (define (filter-let-lvar-spec . xs)
   (filter car (slices xs 2)))
 
-(define (escape-regexp-string str)
-  (with-string-io str
-    (lambda ()
-      (port-for-each
-       (lambda (x)
-	 (case x
-	   ((#\. #\? #\+ #\* #\[ #\] #\{ #\})
-	    (format #t "\\~a" x))
-	   (else (display x))))
-       read-char))))
-
 (define-macro (let-keywords+ rest vspec . es)
   (with-gensyms
    (val str r flag)
@@ -84,7 +73,7 @@
 	      `(cond
 		((regexp-replace-all
 		  ,(string->regexp
-		    (escape-regexp-string
+		    (regexp-quote
 		     (x->string (car v))))
 		  ,str
 		  (lambda _ (set! ,flag #t) ""))

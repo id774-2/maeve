@@ -127,7 +127,20 @@
     (compute-using-register
      :type :general :special-init-value (lambda (parent-nodes) (error "compute-using-register was not initialized.")))
     (lvar-allocation
-     :type :general :special-init-value (lambda (parent-nodes lvar) (error "lvar-allocation was not initialized."))))))
+     :type :general :special-init-value (lambda (parent-nodes lvar) (error "lvar-allocation was not initialized.")))))
+  (compute-pred&succ-result
+   (slot
+    (pred :type :general)
+    (succ :type :general)
+    (stm-pred :type :general)
+    (stm-succ :type :general)
+    (tail-blocks :struct :list)
+    (id->block  :struct :list)))
+  (rd-elm
+   (slot
+    dist src (num :type :general)))
+  (live-elm
+   (slot var (end? :type :general))))
 
 (finish-il-def)
 

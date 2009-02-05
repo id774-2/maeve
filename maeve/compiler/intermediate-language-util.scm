@@ -57,6 +57,17 @@
    (eq? (il:class a) (il:class b))
    (eqv? (il:id a) (il:id b))))
 
+(define (il:equal?-without-id a b)
+  (and
+   (vector? a) (vector? b)
+   (eq? (il:class a) (il:class b))
+   (= (vector-length a) (vector-length b))
+   (let ((r #t) (i 2))
+     (while (and (< i (vector-length a)) r)
+       (set! r (equal? (vector-ref a i) (vector-ref b i)))
+       (inc! i))
+     r)))
+
 (define (il<? a b)
   (and
    (vector? a) (vector? b)
@@ -228,6 +239,9 @@
 		    `(match-define ,',pat ,obj))
 		  (define-macro
 		    (,(symbol-append "let-decompose-" name) obj . body)
+		    `(match-let1 ,',pat ,obj ,@body))
+		  (define-macro
+		    (,(symbol-append "let-decompose-" name "/pred") obj . body)
 		    `(match-let1 ,',pat ,obj ,@body))))
 	    ,@(append-map1-with-index
 	       (lambda (i sd)
