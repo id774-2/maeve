@@ -1,0 +1,31 @@
+2009-02-06 Theoria Laevateinn <theoria@inter7.jp>
+	* release version 0 release 4
+	* example/the_Answer_to_(the_Ultimate_Question_of)_life_the_universe_and_everything.scm newfile. It's joke and stress test about symbol, module name, and others.
+	* example/foregin-function-call.scm It's very primitive test abount FFI.
+	* example/macro.scm It's test abount 'define-macro' special form and macro expander.
+	* BUGS move from BUG_LIST
+	* compiler/misc.scm It contains "miscellaneous operations".
+	
+2008-12-30 Theoria Laevateinn <theoria@inter7.jp>
+	
+	* release version 0 release 3
+	* lib/maeve/complex-type.scm newfile that support vector and pair types.
+	* example/cpx.scm newfile. It's example for lib/maeve/complex-type.scm.
+
+2008-12-01 Theoria Laevateinn <theoria@inter7.jp>
+	
+	* release version 0 release 2
+	* optimize register allocation is added. 
+	* compiler/data-flow-analysis.scm newfile that support data flow analysis and few its.
+	* compiler/register-allocation.scm newfile that support register allocation.
+	
+2008-11-12 Theoria Laevateinn <theoria@inter7.jp>
+	
+	* release version 0 release 1
+	* arch supported x86-32 (called "i386", "IA-32 32bit" ...)
+	* example/fib.scm newfile that compute Fibonacci number
+
+2008-11-10 Theoria Laevateinn <theoria@inter7.jp>
+
+	* release version 0 release 0
+	* arch only x86-64 (called "amd64", "IA-32 64bit" ...)

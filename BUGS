@@ -1,0 +1,26 @@
+(set!-vls-404 ((lvar-403)) (opr2-401 (const-402 :v 8 :type-name scm:integer) (lvar-396 :name y) :opr *))
+#(set! 1972 #(register 942 1)
+       #(opr2 401 *
+	      #(seq 1964
+		    (#(set! 1965 #0=#(register 1963 1) #(const 402 8 scm:integer))
+		     #(set! 1968 #0# #(opr2 1966 sal #0# #(const 1967 #f scm:bool)))
+		     #(set! 1971 #0# #(opr2 1969 + #0# #(const 1970 0 scm:integer))) #0#))
+	      #(register 940 0)))
+
+change-syntax-level:medium->low のバグ　第二正規化の直前
+正規化子で正規化されるべきである
+
+Gainer
+
+(v0r4
+ ("compute-env-overwrite の fuck-up"
+  :問題となるケース "(compute-env-overwrite '((r 0) (r 1) (r 2)) '((r 1) (r 2) (r 0)) identity list (lambda () '(tmp)) identity 'equal?)"
+  :解決法 "fuck-up するケースのみ、冗長なコードを吐いて対処し、コピー伝播で最適化する。ただし、それにあたっては medium->low において無限レジスタモデルの層を追加しなければならない。"))
+
+(v0r2
+ ("テンポラリな lvar が lmd 要素の local-vars スロットに追加されていない。ただし、アトミックにテンポラリな領域は例外。"
+  :問題となるケース "lvar がスタックに割り当てられる場合"
+  :現象 "予測不能")
+ ("レジスタ割り当てが medium->low に行われること。 medium->low を行ってからレジスタ割り当てを行うべきである。"
+  :現象 "今後の最適化戦略において危険"
+  :問題となるケース "予測不能"))
