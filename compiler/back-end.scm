@@ -18,7 +18,7 @@
 	 (make-set!
 	  :dist d
 	  :src (make-opr2 :opr opr :v1 d :v2 (make-asm-int s)))))
-    (values (cut mk '+ <> <>) (cut mk '- <> <>))))
+4    (values (cut mk '+ <> <>) (cut mk '- <> <>))))
 
 (define stack:free   (cut make-inc* *sp* <>))
 (define stack:alloca (cut make-dec* *sp* <>))
@@ -41,7 +41,6 @@
   (mir-traverse
    (target e)
    (use-circular-graph?)
-   (use-debug:print-self?)
    (inherited-attr
     (eplogue '() *inherit*)
     (use-call-result-seq '() *init*))
@@ -96,7 +95,8 @@
        dists srcs)))
    (handler
     (cunit
-     (let1 c-defs (map
+     (let1 c-defs
+	 (map
 		   (lambda (c)
 		     (let1 lbl (make-label
 				:name (symbol-append "const_" (il:id c)))
@@ -213,12 +213,13 @@
 		   (insert-code*
 		    (not abi) (make-block-addr :name (il:id cont-block)))
 		   save-regs))
-	  ((dists sp+:param) ((case abi
-				((x86-32) proc-parameter-allocation:stack)
-				((x86-64) proc-parameter-allocation:x86-64)
-				(else paramalloca))
-			      'call args))
 	  ((sp+:misc) (* vsize (length misc)))
+	  ((dists sp+:param)
+	   ((case abi
+	      ((x86-32) proc-parameter-allocation:stack)
+	      ((x86-64) proc-parameter-allocation:x86-64)
+	      (else paramalloca))
+	    'call args))
 	  ((misc:push-seq misc:pop-seq)
 	   (filter-map2-with-index
 	    (lambda (i src)
@@ -243,9 +244,21 @@
 		       (make-set!-sequence dists (map loop-s args))))
 	     (post-seq
 	      ;; return addr was poped.
-	      `(,((if (not abi) cadr car) misc:pop-seq) ,@use-call-result-seq
-		,@((if (not abi) cddr cdr) misc:pop-seq)
-		,@(stack:free (- sp+:misc (if (not abi) vsize 0))))))
+	      ;;`(,((if (not abi) cadr car) misc:pop-seq) ,@use-call-result-seq
+	      ;;,@((if (not abi) cddr cdr) misc:pop-seq)
+	      ;;,@(stack:free (- sp+:misc (if (not abi) vsize 0))))
+	      (receive (f g o)
+		  (if abi
+		    (values car cdr 0)
+		    (values cadr cddr vsize))
+		`(,@(if abi
+		      (stack:free sp+:param)
+		      '())
+		  ,(f misc:pop-seq)
+		  ,@use-call-result-seq
+		  ,@(g misc:pop-seq)
+		  ,@(stack:free (- sp+:misc o))))
+	      ))
 	 (%make-seq
 	  (if abi
 	    `(,@pre-seq

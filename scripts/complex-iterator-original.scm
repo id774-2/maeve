@@ -336,7 +336,7 @@
 		 (:bool escape?)
 		 (:int i 1 *max-value*))
 		(list 'make-for-each kv? with-index? introspection? escape?)))))
-    #?=(length r)
+    ;;#?=(length r)
     r))
 
 (gen)
