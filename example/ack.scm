@@ -26,15 +26,16 @@
 	     (ack m (- n 1))))))
 
   (define (main)
-    (print (ack 0 0)) ;; 1
-    (print (ack 0 1)) ;; 2
-    (print (ack 1 0)) ;; 2
-    (print (ack 1 1)) ;; 3
-    (print (ack 1 2)) ;; 4
-    (print (ack 2 1)) ;; 5
-    (print (ack 2 2)) ;; 7
-    (print (ack 3 2)) ;; 29
-    (print (ack 2 3)) ;; 9
-    (print (ack 3 3)) ;; 61
-    ;; (print (ack 3 12))
+;;     (print (ack 0 0)) ;; 1
+;;     (print (ack 0 1)) ;; 2
+;;     (print (ack 1 0)) ;; 2
+;;     (print (ack 1 1)) ;; 3
+;;     (print (ack 1 2)) ;; 4
+;;     (print (ack 2 1)) ;; 5
+;;     (print (ack 2 2)) ;; 7
+;;     (print (ack 3 2)) ;; 29
+;;     (print (ack 2 3)) ;; 9
+;;     (print (ack 3 3)) ;; 61
+    (print (ack 3 12))
+    (main)
     ))

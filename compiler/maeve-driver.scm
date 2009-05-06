@@ -161,12 +161,17 @@
 	     (x
 	      (normalize&reduce-graph
 	       #f
-	       (change-syntax-level:medium->low 
-		register-allocation:primitive-approximation
-		proc-parameter-allocation:register
-		main-unit)))
+	       (rlet1
+		x (change-syntax-level:medium->low 
+		   register-allocation:primitive-approximation
+		   proc-parameter-allocation:register
+		   main-unit)
+		(with-output-to-file #`"tmp/,main-entry-name"
+		  (cut write/ss x))
+		;;(debug:il:pp "pre-normalize2" x)
+		)))
 	     (_ (begin
-		  (debug:il:pp "medium->low extra" x)
+		  ;;(debug:il:pp "post-normalize2" x)
 		  (when-stop "medium->low" x)))
 	     (y (low-level-code->x86+x86-64 x)))
 	(call-with-output-asm-file

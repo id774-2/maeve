@@ -672,6 +672,36 @@
 	    (loop-s src))
 	   (else (error "context-fault : src of set!-vls or set! :" *self*)))))))
    (handler
+    (opr2
+     (define outer '())
+     (define (trick accs)
+       (let loop1 ((accs accs) (result #f))
+	 (if (null? accs)
+	   result
+	   (let* ((acc (car accs)) (tgt (acc *self*)))
+	     (case/pred
+	      tgt
+	      ((block? seq?)
+	       (let1 lp
+		   (last-pair
+		    ((if (block? tgt) block:es-of seq:es-of)
+		     tgt))
+		 (update!
+		  (car lp)
+		  (lambda (x) (set! (acc *self*) x) *self*))
+		 (update! (car lp) loop-s)
+		 (push!
+		  outer
+		  (lambda (extra)
+		    (set! (car lp) extra)
+		    tgt))
+		 (loop1 (cdr accs) *self*)))
+	      
+	      (else
+	       (update! (acc *self*) loop-s)
+	       (loop1 (cdr accs) *self*)))))))
+     (let1 r (trick (list opr2:v1-of opr2:v2-of))
+       (fold (lambda (p e) (p e)) r outer)))
     (block
      (let1 fes (map loop-s (seqflat-all es))
        (begin0
@@ -727,8 +757,10 @@
      (*update!* :es (if in-lmd?
 		      (normalize:block&others (map loop-s es))
 		      (map loop-s es))))
-    (set!     (process-set!-expr set!:dist-of set!:src-of))
-    (set!-vls (process-set!-expr set!-vls:dists-of set!-vls:src-of))))
+    (set!     (*update!*)
+	      (process-set!-expr set!:dist-of set!:src-of))
+    (set!-vls (*update!*)
+	      (process-set!-expr set!-vls:dists-of set!-vls:src-of))))
   (when-debug:flowgraph
    (when require-graphviz?
      (il->graphviz* #`",|require-graphviz?|-2" e)))
@@ -773,7 +805,7 @@
       (when-stop "normalize-1" y)
       (with-output-to-mir-file
        omn (pretty-print y :use-global-table? #t))
-      (debug:il:pp #`"compile ,omn extra" y)
+      ;;(debug:il:pp #`"compile ,omn extra" y)
       (make-compile-result
        :omn omn
        :imported-modules
