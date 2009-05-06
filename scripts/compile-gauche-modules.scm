@@ -13,7 +13,7 @@
   (call-with-input-process str (lambda _)))
 
 (define (make-one stub-extra orig-file-full)
-  (format #t "I'll compile ~s\n" orig-file-full)
+  (format #t " ** compile ~s\n" orig-file-full)
   (receive (dir orig-file suffix) (decompose-path orig-file-full)
     (and-let* ((rx (#/(.+?)-original/ orig-file))
 	       (file (rxmatch-substring rx 1)))
@@ -24,7 +24,7 @@
       (let* ((cc-in (build-path dir #`",|file|.c"))
 	     (cc-out (build-path dir #`",|file|.so"))
 	     (so (build-path maeve-gauche-lib-dir cc-out))
-	     (cmd #`"gcc -fPIC -shared -std=gnu99 -DHAVE_CONFIG_H ,(gauche-config \"-I\") -o ,|cc-out| ,|cc-in|"))
+	     (cmd #`"gcc-3.4 -fPIC -shared -std=gnu99 -DHAVE_CONFIG_H ,(gauche-config \"-I\") -o ,|cc-out| ,|cc-in|"))
 	(format #t "compile C language file:\n ~s\n" cmd)
 	(exec-command cmd)
 	(exec-command #`"mv ,|cc-out| ,|so|")
