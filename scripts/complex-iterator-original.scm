@@ -305,7 +305,7 @@
        (reverse! ,r))))
 
 (define-macro (gen)
-  (let* ((*max-value* 5)
+  (let* ((*max-value* 4)
 	 (r
 	  `(begin
 	     ,@(%loop
@@ -340,6 +340,9 @@
     r))
 
 (gen)
+
+(make-mapn #t #t #f #f #f #f #f 0 5)
+(make-mapn #f #f #f #f #f #f #f 0 5)
 
 ;; iterator for keyword-list
 
