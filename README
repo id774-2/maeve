@@ -3,8 +3,12 @@ The Scheme optimization compiler for the "Computing" Stickers.
  ** Install
 
 警告 : 展開後に出来るディレクトリの名前をイジらないで下さい。正常に実行されなくなってしまいます。
-警告 : スクリプトの実行は必ず例のように user-driver.scm のあるディレクトリで行ってください。細かなファイルパスの依存関係が残っているのです。
 
  $ tar zxvf Maeve-*.tar.gz
  $ cd maeve
- $ gosh scripts/make-so-gauche-module.scm
+ $ ./setup.sh
+
+ ** Build Example and execute
+
+ $ ./maeve example/cpx.scm
+ $ ./cpx

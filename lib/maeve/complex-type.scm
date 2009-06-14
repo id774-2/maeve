@@ -4,7 +4,7 @@
 (il
  (define-complex-type pair 0 car cdr)
  (define-complex-type vector 1 length (elms :unfixed-size? #t))
- (define-complex-type closure-env 2 length (elms :unfixed-size? #t)))
+ (define-complex-type closure 2 lbl length (elms :unfixed-size? #t)))
 
 (define (pair? x) (= 0 (il (mem (elm-addr x pair tag)))))
 (define (vector? x) (= 1 (il (mem (elm-addr x vector tag)))))

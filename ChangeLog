@@ -1,10 +1,17 @@
+2009-05-06 Theoria Laevateinn <theoria@inter7.jp>
+	* release version 0 release 4
+	* added "complex-type"
+	* middle-end.scm bug fix about normalizer
+	* maeve-driver.scm loop if internal error of gcc
+	
 2009-02-06 Theoria Laevateinn <theoria@inter7.jp>
+	
 	* pre-release version 0 release 4 pre 0
 	* new-function complex type and primitive macro
 	* experimental-code closure conversion
 	
 2009-02-06 Theoria Laevateinn <theoria@inter7.jp>
-	* release version 0 release 4
+	
 	* example/the_Answer_to_(the_Ultimate_Question_of)_life_the_universe_and_everything.scm newfile. It's joke and stress test about symbol, module name, and others.
 	* example/foregin-function-call.scm It's very primitive test abount FFI.
 	* example/macro.scm It's test abount 'define-macro' special form and macro expander.

@@ -81,9 +81,9 @@
 	     :opt-succ (%make-block-addr then-block))))
       (list pre-block then-block els-block end-block)))
   (define (normalize:trampoline x)
-    (if (value-element? x)
+    (if (or (value-element? x) (lmd? x))
       (values x '())
-      (let1 tmp (%make-lvar)
+      (let1 tmp #?=(%make-lvar)
 	(values tmp (list (make-set!-vls :dists (list tmp) :src x))))))
   (define (fetch-gvar %current-module-table cunit s)
     (define %make (mcut make-mem :base <>))
@@ -124,7 +124,7 @@
    (define (scm:check-internal-macro e)
      (let loop ((e e))
        (scheme->mir:match
-	e "scheme-syntax-error (internal macro)"
+	#?=e "scheme-syntax-error (internal macro)"
 	(('let* (((? symbol? vs) es) ...) body . more)
 	 (fold-right
 	  (lambda (v e body) `(let ((,v ,e)) ,body))
@@ -159,7 +159,7 @@
      (let loop ((e e) (lvar lvar) (tail-ctx? tail-ctx?) (in-lmd? in-lmd?))
        (define (loop-s x) (loop x lvar tail-ctx? in-lmd?))
        (scheme->mir:match
-	(il:check-internal-macro e) "intermediate-language-syntax-error"
+	#?=(il:check-internal-macro e) "intermediate-language-syntax-error"
 
 	(('with-vars ((? symbol? vs) ...) . body)
 	 (let1 lvar+ (map (cut %make-lvar <>) vs)
@@ -458,6 +458,7 @@
 	 
 	 ;; S - CONST
 	 (cp:ref handler:quote)
+	 ;; E - CONST
 
 	 ;; S - FUNCALL & REF VARIABLE
 	 ((proc . args) (cp:ref call-process))
@@ -467,9 +468,7 @@
 	 (else
 	  (cond
 	   ((check-const e loop-s) => identity)
-	   (else (error "scheme-syntax-error (else case) :" e)))))
-	;; E - CONST
-	))))
+	   (else (error "scheme-syntax-error (else case) :" e)))))))))
   (cunit:es-set! cunit (map trans es)))
 
 
@@ -798,7 +797,7 @@
 		 "+")))
 	     (else (symbol-append "noname" (eq-hash x)))))
 	   (_ (when-debug:flowgraph (il->graphviz* #`",|omn|-1" x)))
-	   ;; (x (closure-convert x))
+	   (x (closure-convert x))
 	   (_ (when-stop "closure-convert" x))
 	   (y (normalize&reduce-graph omn x)))
       (when-debug:flowgraph (il->graphviz* #`",|omn|-3" y))
@@ -851,5 +850,56 @@
 	     (*update!*))))))
     (update! (cunit:es-of* ne) (cut append (reverse! extra-toplevel) <>))
     ne))
+
+;; (define (closure-convert e)
+;;   (define (mark e)
+;;     (let1 extra-vars '()
+;;       (mir-traverse
+;;        (target e)
+;;        (use-circular-graph?)
+;;        (inherited-attr (envs '() *inherit*))
+;;        (handler
+;; 	(lmd
+;; 	 (push! extra-vars (list #f))
+;; 	 (let ((nes (map (cut loop <> (cons args envs)) es))
+;; 	       (reqenvs (reverse
+;; 			 #?=(remove
+;; 			     (lambda (e) (memq e args))
+;; 			     (drop-right (pop! extra-vars) 1)))))
+;; 	   (for-each (lambda (e) (push! (car extra-vars) e)) reqenvs)
+;; 	   (*update!*
+;; 	    :env reqenvs :es nes)))
+;; 	(lvar
+;; 	 (let1 env
+;; 	     (or
+;; 	      (find (lambda (e) (memq *self* e)) envs)
+;; 	      (error "closure-convert 0 :" *self*))
+;; 	   (unless (eq? env (car envs))
+;; 	     (update! (car #?=extra-vars) (cut lset-adjoin/save-order eq? <> s)))
+;; 	   (*update!*)))))))
+;;   (define (move-toplevel e)
+;;     (let* ((lmds '())
+;; 	   (e
+;; 	    (mir-traverse
+;; 	     (target e)
+;; 	     (handler
+;; 	      (lmd
+;; 	       (if (parent-is-a-define?)
+;; 		 (*update!*)
+;; 		 (push! lmds
+;; 			(make-
+;; 	     (let loop ((e e))
+;; 		(match
+;; 		 e
+;; 		 (('lambda args es ...)
+;; 		  (let1 name (gensym)
+;; 		    (push! lmds `(define ,name (lambda ,args ,@(map loop es))))
+;; 		    `(closure ,name ,(car args))))
+;; 		 (('lvar _ _) e)
+;; 		 ((xs ...) (map loop xs))
+;; 		 (else e)))))
+;;       `(,@(reverse! lmds) ,e)))
+;;   (move-toplevel (mark e)))
+       
 
 (provide "maeve/compiler/middle-end")
