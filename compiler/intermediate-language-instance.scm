@@ -69,7 +69,7 @@
 		       :misc (:check module?))))
   (lmd (slot (param :struct :list :misc (:check (every$ lvar?)))
 	     (local-vars :struct :list :misc (:check (every$ lvar?)))
-	     (extra-env  :struct :list-list)
+	     (extra-env  :struct :list)
 	     (rest-arg? :type :general)
 	     (es :struct :list
 		 :special-slot-handler (cut seqflat <> loop-s))))

@@ -171,7 +171,7 @@
 		;;(debug:il:pp "pre-normalize2" x)
 		)))
 	     (_ (begin
-		  ;;(debug:il:pp "post-normalize2" x)
+		  (debug:il:pp "post-normalize2" x)
 		  (when-stop "medium->low" x)))
 	     (y (low-level-code->x86+x86-64 x)))
 	(call-with-output-asm-file

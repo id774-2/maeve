@@ -4,6 +4,7 @@
   (use maeve.compiler.intermediate-language-instance)
   (use maeve.compiler.register-allocation)
   (use maeve.compiler.misc)
+  (use maeve.compiler.middle-end)
   (export-all))
 
 (select-module maeve.compiler.back-end)
@@ -84,7 +85,8 @@
        %make-set!
        (let1 tmps
 	   (compute-temp-space
-	    (+ 1 (ceiling (/. (length dists) 2)))
+	    ;;(+ 1 (ceiling (/. (length dists) 2)))
+	    (length dists)
 	    (filter-map1
 	     (lambda (x)
 	       (cond
@@ -110,8 +112,9 @@
     (allocate-cpx
      (decompose-def-cpx-type
       (hash-table-get*
-       (mod:type-table-of %current-module)
-       type-name (error "Unknown complex type name :" type-name)))
+       (mod:type-table-of
+	(%module-complex-type))
+       type-name (error "Unknown complex type name 0 :" type-name)))
      (let1 size (make-asm-int (* vsize (+ 1 ;; type tag
 					  (length general-slots))))
        (*loop*
@@ -305,8 +308,8 @@
     (elm-addr
      (decompose-def-cpx-type
       (hash-table-get*
-       (mod:type-table-of %current-module) type-name
-       (error "Unknown complex type name :" type-name)))
+       (mod:type-table-of (%module-complex-type)) type-name
+       (error "Unknown complex type name 1 :" type-name)))
      (unless (mem? (car *parent-nodes*))
        (error "elm-addr context fault" (cons *self* *parent-nodes*)))
      (let*-values
