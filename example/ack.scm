@@ -1,5 +1,5 @@
 (define-module ack
-  (import immediate-type)
+  (import core)
 ;;   (define (ack m n)
 ;;     (il (call-c-function printf "%d %d\n" n m))
 ;;     (if (zero? m)

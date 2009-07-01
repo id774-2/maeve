@@ -94,8 +94,22 @@
 		(else #f)))
 	     dists))
 	 (lambda () (pop! tmps)))
-       dists srcs)))
+       dists srcs))
+    )
    (handler
+    (const
+     (cond
+      ((large-const-type? v)
+       (hash-table-get large-const->lbl *self*))
+      ((and
+	(memq type-name '(scm:bool scm:nil scm:eof
+				   scm:undef scm:unbound))
+	(or (small-const-type? v)
+	    (memq v '(eof undef unbound))))
+       (*update!*))
+      ((eq? type-name 'scm:integer)
+       (loop-s (make-make-imm :type-name 'integer :v *self*)))
+      (else (error "Unsupported constant type (1st) :" *self*))))
     (cunit
      (let1 c-defs
 	 (map
@@ -113,7 +127,7 @@
      (decompose-def-cpx-type
       (hash-table-get*
        (mod:type-table-of
-	(%module-complex-type))
+	(%module-core))
        type-name (error "Unknown complex type name 0 :" type-name)))
      (let1 size (make-asm-int (* vsize (+ 1 ;; type tag
 					  (length general-slots))))
@@ -125,22 +139,9 @@
 	       :args
 	       (list
 		(cond
-		 ((and unfixed-slot (loop-s unfixed-size))
+		 ((and unfixed-slot unfixed-size)
 		  => (mcut make-opr2 :opr '+ :v1 size :v2 <>))
 		 (else size)))))))
-    (const
-     (cond
-      ((large-const-type? v)
-       (hash-table-get large-const->lbl *self*))
-      ((and
-	(memq type-name '(scm:bool scm:nil scm:eof
-				   scm:undef scm:unbound))
-	(or (small-const-type? v)
-	    (memq v '(eof undef unbound))))
-       (*update!*))
-      ((eq? type-name 'scm:integer)
-       (loop-s (make-make-imm :type-name 'integer :v *self*)))
-      (else (error "Unsupported constant type (1st) :" *self*))))
     (deflabel
       (unless (label? lbl) (error "Invalid label of deflabel :" lbl))
       (let1 data-definition? (not (lmd? e))
@@ -262,6 +263,7 @@
 		  ,@(g misc:pop-seq)
 		  ,@(stack:free (- sp+:misc o))))
 	      ))
+	 (set! proc (loop-s proc))
 	 (%make-seq
 	  (if abi
 	    `(,@pre-seq
@@ -308,7 +310,7 @@
     (elm-addr
      (decompose-def-cpx-type
       (hash-table-get*
-       (mod:type-table-of (%module-complex-type)) type-name
+       (mod:type-table-of (%module-core)) type-name
        (error "Unknown complex type name 1 :" type-name)))
      (unless (mem? (car *parent-nodes*))
        (error "elm-addr context fault" (cons *self* *parent-nodes*)))
@@ -368,7 +370,12 @@
     (imm-ref
      (make-opr2
       :opr 'sar :v1 (loop-s v)
-      :v2 (make-asm-int (cunit:imm-type-tag-size-of e)))))))
+      :v2 (make-asm-int (cunit:imm-type-tag-size-of e))))
+    (set!
+     (print "set!")
+     (let1 s (loop-s src)
+       (print src)(print s)
+       (*update!* :src s))))))
 
 (define (low-level-code->x86+x86-64 expr)
   (define (vnum->byte x) (* (variable-size) x))

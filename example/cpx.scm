@@ -1,6 +1,5 @@
 (define-module cpx
-  (import immediate-type)
-  (import complex-type)
+  (import core)
   (define (print-list xs)
     (if (null? xs)
       #t

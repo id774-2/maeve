@@ -53,11 +53,12 @@
 	      ;;:special-slot-handler (cut seqflat <> loop-s)
 	      )))
   (block (slot
-	  (es :struct :list)
+	  (es :struct :list
+	      :special-slot-handler (lambda (x) #?=(seqflat-all #?=x loop-s))
+	      )
 	  (default-succ :type :il-or-false)
 	  (opt-succ :type :il-or-false)
 	  (test :type :il-or-false)
-	  ;;(succs :struct :list :misc (:check (every$ jump-if?)))
 	  ))
   (block-addr (slot (name :type :general)))
   (seq (slot (es :struct :list)))
@@ -71,8 +72,7 @@
 	     (local-vars :struct :list :misc (:check (every$ lvar?)))
 	     (extra-env  :struct :list)
 	     (rest-arg? :type :general)
-	     (es :struct :list
-		 :special-slot-handler (cut seqflat <> loop-s))))
+	     (es :struct :list)))
   (lvar (slot (name :type :general)))
   (svar (slot (type :type :general)))
   (result (slot (num :type :general)))
@@ -178,11 +178,11 @@
 
 (finish-il-def)
 
-(define (seqflat-all xs)
+(define (seqflat-all xs . proc)
   (let1 flatted? #t
     (while flatted?
-      ;; (set!-values (xs flatted?) (seqflat xs))
-      (receive (x y) (seqflat xs)
+      ;; (set!-values (xs flatted?) (apply seqflat xs proc))
+      (receive (x y) (apply seqflat xs proc)
 	(set! flatted? y) (set! xs x)))
     xs))
 

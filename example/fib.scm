@@ -1,5 +1,5 @@
 (define-module fib
-  (import immediate-type))
+  (import core))
 
 (select-module fib)
 

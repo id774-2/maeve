@@ -42,9 +42,9 @@
 (define *known-modules* (make-hash-table 'eq?))
 (define *default-module* (make-mod :name 'user))
 
-(define (%module-complex-type)
+(define (%module-core)
   (hash-table-get*
-   *known-modules* 'complex-type
+   *known-modules* 'core
    (error "module complex-type does not exist 0.")))
 
 (define (compile-file file stop)
@@ -82,52 +82,55 @@
 				 v))
 		 (push! pres pre)
 		 (values v pre)))
-	       (case k
-		 ((:unfixed-size)
-		  (receive (v pre) (%n v)
-		    (set! unfixed-size v) #f))
-		 (else
-		  (let1 sk (symbol-append k)
-		    (cond
-		     ((memq sk general-slots)
-		      (receive (v pre) (%n v)
-			(make-set!-vls
-			 :src v
-			 :dists
-			 (list (make-mem
-				:base
-				(make-elm-addr
-				 :base %v
-				 :type-name tn :slot-name sk))))))
-		     ((eq? sk unfixed-slot)
-		      (make-seq
-		       :es
-		       (map1-with-index
-			(lambda (idx v)
-			  (receive (v pre) (%n v)
-			    (make-set!-vls
-			     :src v
-			     :dists
-			     (list (make-mem
-				    :base
-				    (make-elm-addr
-				     :base %v
-				     :type-name tn :slot-name sk
-				     :index (make-scm-int idx)))))))
-			v)))
-		     (else
-		      (error "make-complex-type : unkown slot :" sk)))))))
+	     (case k
+	       ((:unfixed-size)
+		(receive (v pre) (%n v)
+		  (set! unfixed-size v) #f))
+	       (else
+		(let1 sk (symbol-append k)
+		  (cond
+		   ((memq sk general-slots)
+		    (receive (v pre) (%n v)
+		      (make-set!-vls
+		       :dists (list v)
+		       :src
+		       (make-mem
+			:base
+			(make-elm-addr
+			 :base %v
+			 :type-name tn :slot-name sk)))))
+		   ((eq? sk unfixed-slot)
+		    (make-seq
+		     :es
+		     (map1-with-index
+		      (lambda (idx v)
+			(receive (v pre) (%n v)
+			  (make-set!-vls
+			   :src v
+			   :dists
+			   (list (make-mem
+				  :base
+				  (make-elm-addr
+				   :base %v
+				   :type-name tn :slot-name sk
+				   :index (make-scm-int idx)))))))
+		      v)))
+		   (else
+		    (error "make-complex-type : unkown slot :" sk)))))))
 	   spec)))
-    (%make-seq
-     `(,@(flat-1 pres)
-       ,(make-set!-vls
-	 :dists (list %v)
-	 :src (make-allocate-cpx
-	       :unfixed-size unfixed-size :type-name tn))
-       ,@inits
-       ,(if vls?
-	  (make-vls :es (list %v))
-	  %v)))))
+    (let1 cpx (make-allocate-cpx
+	       :unfixed-size unfixed-size :type-name tn)
+      (values
+       (%make-seq
+	`(,@(flat-1 pres)
+	  ,(make-set!-vls
+	    :dists (list %v)
+	    :src cpx)
+	  ,@inits
+	  ,(if vls?
+	     (make-vls :es (list %v))
+	     %v)))
+       cpx))))
 
 (define (scheme->mir es stop)
   (define (add-begin x)
@@ -389,9 +392,12 @@
 			 vs)))
 		 (body
 		  (let1 body-var (append (map cons vs lvar+) lvar)
-		    (map
-		     (cut loop <> (append (map cons vs lvar+) lvar) #t #t)
-		     (cons body more)))))
+		    (list
+		     (make-block
+		      :es
+		      (map
+		       (cut loop <> (append (map cons vs lvar+) lvar) #t #t)
+		       (cons body more)))))))
 	    (make-lmd :param lvar+ :local-vars (pop! %local-vars)
 		      :rest-arg? rest-arg? :es body)))
 
@@ -840,19 +846,20 @@
 		 "+")))
 	     (else (symbol-append "noname" (eq-hash x)))))
 	   (_ (when-debug:flowgraph (il->graphviz* #`",|omn|-1" x)))
-	   ;;(x (closure-convert x))
+	   (x (closure-convert x))
 	   (_ (when-stop "closure-convert" x))
-	   (y (normalize&reduce-graph omn x)))
-      (when-debug:flowgraph (il->graphviz* #`",|omn|-3" y))
-      (when-stop "normalize-1" y)
+	   (x (normalize&reduce-graph omn x))
+	   )
+      (when-debug:flowgraph (il->graphviz* #`",|omn|-3" x))
+      (when-stop "normalize-1" x)
       (with-output-to-mir-file
-       omn (pretty-print y :use-global-table? #t))
-      (debug:il:pp #`"compile ,omn extra" y)
+       omn (pretty-print x :use-global-table? #t))
+      (debug:il:pp #`"compile ,omn extra" x)
       (make-compile-result
        :omn omn
        :imported-modules
        (flat-1
-	(let* ((mods (cunit:modules-of* y))
+	(let* ((mods (cunit:modules-of* x))
 	       (ims (map (compose (map$ mod:name-of*) mod:imported-modules-of*)
 			 mods)))
 	  ;; (format (current-error-port) "** import ~s : ~s\n" (map mod:name-of* mods) ims)
@@ -862,6 +869,9 @@
   (let* ((extra-envs '())
 	 (extra-toplevel '())
 	 (parent-lmd-lvs '())
+	 (closure->lbl (make-hash-table 'eq?))
+	 (closure->reqvars (make-hash-table 'eq?))
+	 (lbl->lmd (make-hash-table 'eq?))
 	 (ne
 	  (mir-traverse
 	   (target e)
@@ -885,28 +895,74 @@
 	       (for-each (lambda (e) (push! (car extra-envs) e)) reqvars)
 	       (if (parent-is-a-deflabel?)
 		 (%update)
-		 (let* ((lbl (make-label :module %current-module))
-			(clo
-			 (%make-cpx-handler
-			  #f #f %make-lvar
-			  (%module-complex-type)
-			  'closure
-			  (list :lbl lbl :elms reqvars
-				:unfixed-size (make-scm-int (length reqvars))
-				:length (make-scm-int (length reqvars))))))
-		     (push! extra-toplevel
-			    (let1 x (make-deflabel :e (%update) :lbl lbl)
-			      (if %current-module
-				(make-with-mod
-				 :module %current-module :body x)
-				x)))
-		     clo))))
+		 (let*-values
+		     (((lbl) (make-label :module %current-module))
+		      ((clo %allocate-cpx)
+		       (%make-cpx-handler
+			#f #f %make-lvar
+			(%module-core)
+			'closure
+			(list :lbl lbl :elms reqvars
+			      :unfixed-size (make-scm-int (length reqvars))
+			      :length (make-scm-int (length reqvars))))))
+		   (hash-table-put! closure->lbl %allocate-cpx lbl)
+		   (hash-table-put! closure->reqvars %allocate-cpx reqvars)
+		   (push! extra-toplevel
+			  (let1 x (make-deflabel :e (%update) :lbl lbl)
+			    (hash-table-put! lbl->lmd lbl *self*)
+			    (if %current-module
+			      (make-with-mod
+			       :module %current-module :body x)
+			      x)))
+		   clo))))
 	    (lvar
 	     (and-let* ((env (find (lambda (e) (member *self* e il:eqv?)) envs)))
 	       (update! (car extra-envs) (cut lset-adjoin eq? <> *self*)))
 	     (*update!*))))))
     (update! (cunit:es-of* ne) (cut append (reverse! extra-toplevel) <>))
-    ne))
+    (update! ne (cut normalize&reduce-graph #f <>))
+    (hash-table-for-each
+     (reach ne)
+     (lambda (stm rd)
+       (when (call? stm)
+       (format #t " * ~s\n" (il->sexp/ss stm))
+       (hash-table-for-each
+	rd (lambda (v es)
+	     (for-each
+	      (lambda (e)
+		(decompose-rd-elm e)
+		(format #t "  ~s = ~s\n" (il->sexp/ss dist)
+			(il->sexp/ss src)))
+	      es))))))
+    (let1 %reach (reach ne)
+(macro-debug
+      (mir-traverse
+       (use-debug:print-self?)
+       (use-circular-graph?)
+       (target ne)
+       (handler
+	(call
+	 #?=(if (not (lvar? proc))
+	   (*update!*)
+	   (let1 prd (hash-table-get (hash-table-get %reach *self*) proc)
+	     (unless (length=1? prd)
+	       (error "closure-convert : a lot of RD :" prd))
+	     (let-decompose-rd-elm
+	      (car prd)
+	      (if (not (and (allocate-cpx? src)
+			    (eq? 'closure (allocate-cpx:type-name-of src))))
+		(*update!*)
+		(make-seq
+		 :es
+		 `(,@(map
+		      (lambda (d s) (make-set!-vls :src s :dists (list d)))
+		      (lmd:extra-env-of
+		       (hash-table-get lbl->lmd (hash-table-get closure->lbl src)))
+		      (hash-table-get closure->reqvars src))
+		   ,(*update!*
+		     :proc (make-elm-addr
+			    :base proc
+			    :type-name 'closure :slot-name 'lbl)))))))))))))))
 
 ;; (define (closure-convert e)
 ;;   (define (mark e)

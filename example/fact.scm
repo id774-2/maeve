@@ -1,5 +1,5 @@
 (define-module fact
-  (import immediate-type)
+  (import core)
   (define (fact n)
     (if (zero? n)
       1

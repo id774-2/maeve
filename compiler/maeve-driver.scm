@@ -113,7 +113,7 @@
 	       ,@(append-map1 cunit:es-of cunits))))
       (when-stop "pre-medium->low" main-unit)
       ;;(debug:il:pp "pre-medium->low extra" main-unit)
-      (when-debug ;:ud-chain
+      (when #t
        (let* ((%reach (reach main-unit))
 	      (chain (make-hash-table 'equal?)))
 	 ;;        (hash-table-dump*
@@ -168,10 +168,10 @@
 		   main-unit)
 		(with-output-to-file #`"tmp/,main-entry-name"
 		  (cut write/ss x))
-		;;(debug:il:pp "pre-normalize2" x)
+		(debug:il:pp/ss "pre-normalize2" x)
 		)))
 	     (_ (begin
-		  (debug:il:pp "post-normalize2" x)
+		  (debug:il:pp/ss "post-normalize2" x)
 		  (when-stop "medium->low" x)))
 	     (y (low-level-code->x86+x86-64 x)))
 	(call-with-output-asm-file

@@ -1,6 +1,5 @@
 (define-module closure
-  (import immediate-type)
-  (import complex-type)
+  (import core)
   (define (main)
     ((lambda (a b c)
        ((lambda ()
