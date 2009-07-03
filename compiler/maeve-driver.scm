@@ -105,15 +105,25 @@
 	 (cond
 	  ((length=1? %imm-type->tag)
 	   (car %imm-type->tag))
-	  ((null? %imm-type->tag) #f)
 	  (else
-	   (error "Too many imm-type->tag :" %imm-type->tag)))
+	   (error "Too many or too few imm-type->tag :" %imm-type->tag)))
+	 :imm-type-tag-size
+	 (let1 %imm-type-tag-size
+	     (filter-map
+	      (lambda (x)
+		(cunit:imm-type-tag-size-of x))
+	      cunits)
+	   (cond
+	    ((length=1? %imm-type-tag-size)
+	     (car %imm-type-tag-size))
+	    (else
+	     (error "Too many or too few imm-type->tag :" %imm-type->tag))))
 	 :es `(,(%make-deflabel
 		 main-init (make-lmd :es (list (make-block :es %inits))))
 	       ,@(append-map1 cunit:es-of cunits))))
       (when-stop "pre-medium->low" main-unit)
       ;;(debug:il:pp "pre-medium->low extra" main-unit)
-      (when #t
+      (when #f
        (let* ((%reach (reach main-unit))
 	      (chain (make-hash-table 'equal?)))
 	 ;;        (hash-table-dump*
@@ -168,18 +178,20 @@
 		   main-unit)
 		(with-output-to-file #`"tmp/,main-entry-name"
 		  (cut write/ss x))
-		(debug:il:pp/ss "pre-normalize2" x)
+		;; (debug:il:pp/ss "pre-normalize2" x)
 		)))
 	     (_ (begin
-		  (debug:il:pp/ss "post-normalize2" x)
+		  (debug:il:pp "post-normalize2" x)
 		  (when-stop "medium->low" x)))
 	     (y (low-level-code->x86+x86-64 x)))
 	(call-with-output-asm-file
 	 main-entry-name (cut %write-tree y <>))
+	(flush-all-ports)
 	(unless (equal? "pre-link" stop)
 	  #?=(run-process
 	      #?=`("gcc"
 	     "-o" ,main-entry-name
-	     ,(omn->asm-file main-entry-name))))))))
+	     ,(omn->asm-file main-entry-name))
+	      :wait #t))))))
 
 (provide "maeve/compiler/maeve-driver")

@@ -41,6 +41,7 @@
   (decompose-register-allocation-result (regalloca paramalloca e))
   (mir-traverse
    (target e)
+   (use-debug:print-self?)
    (use-circular-graph?)
    (inherited-attr
     (eplogue '() *inherit*)
@@ -97,19 +98,6 @@
        dists srcs))
     )
    (handler
-    (const
-     (cond
-      ((large-const-type? v)
-       (hash-table-get large-const->lbl *self*))
-      ((and
-	(memq type-name '(scm:bool scm:nil scm:eof
-				   scm:undef scm:unbound))
-	(or (small-const-type? v)
-	    (memq v '(eof undef unbound))))
-       (*update!*))
-      ((eq? type-name 'scm:integer)
-       (loop-s (make-make-imm :type-name 'integer :v *self*)))
-      (else (error "Unsupported constant type (1st) :" *self*))))
     (cunit
      (let1 c-defs
 	 (map
@@ -137,9 +125,12 @@
 	       :abi (arch)
 	       :proc (make-label :name 'malloc :foregin? #t)
 	       :args
-	       (list
+	       #?=(list
 		(cond
-		 ((and unfixed-slot unfixed-size)
+		 ((and unfixed-slot
+		       (not (and (const? unfixed-size)
+				 (= 0 (const:v-of unfixed-size))))
+		       unfixed-size)
 		  => (mcut make-opr2 :opr '+ :v1 size :v2 <>))
 		 (else size)))))))
     (deflabel
@@ -348,6 +339,19 @@
 		      (error "Unknown slot name of complex type :"
 			     slot-name type-name))))))))))
        (vector pre base offset)))
+    (const
+     (cond
+      ((large-const-type? v)
+       (hash-table-get large-const->lbl *self*))
+      ((and
+	(memq type-name '(scm:bool scm:nil scm:eof
+				   scm:undef scm:unbound))
+	(or (small-const-type? v)
+	    (memq v '(eof undef unbound))))
+       (*update!*))
+      ((eq? type-name 'scm:integer)
+       (loop-s (make-make-imm :type-name 'integer :v *self*)))
+      (else (error "Unsupported constant type (1st) :" *self*))))
     (make-imm
      (let1 tmp (car (compute-temp-space 1))
        (make-seq
@@ -372,7 +376,6 @@
       :opr 'sar :v1 (loop-s v)
       :v2 (make-asm-int (cunit:imm-type-tag-size-of e))))
     (set!
-     (print "set!")
      (let1 s (loop-s src)
        (print src)(print s)
        (*update!* :src s))))))
@@ -449,9 +452,10 @@
 	(mem
 	 (let1 r (loop:inherit-lsm base)
 	   (cond
+	    (offset (list offset "(" r ")"))
 	    (label-prefix-jump-mode? r)
 	    ((label? base) r)
-	    (else (list offset "(" r ")")))))
+	    (else (list "(" r ")")))))
 	(cunit
 	 (list
 	  (when entry-point
@@ -593,7 +597,7 @@
 	(register
 	 (operand:
 	  (if (and (integer? num)
-		   (<= 0 num (- (num-of-registers) 1)))
+		   (<= 0 num (num-of-registers)))
 	    (vector-ref (registers) num)
 	    (error "Unknown register number :" num))))
 	(result

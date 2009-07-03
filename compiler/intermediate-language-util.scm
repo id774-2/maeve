@@ -1,5 +1,5 @@
 (define-module maeve.compiler.intermediate-language-util
-  (extend srfi-1 srfi-13 srfi-42 srfi-43
+  (extend srfi-1 srfi-11 srfi-13 srfi-42 srfi-43
 	  util.list file.util util.match gauche.parameter text.tree
 	  gauche.process
 	  maeve.lib.gauche.pp

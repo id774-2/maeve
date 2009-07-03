@@ -10,7 +10,8 @@
     ,@(map
        (lambda (n)
 	 `(define ,n (make-parameter "parameterized-arch is not installed.")))
-       '(variable-size registers num-of-registers special-registers
+       '(variable-size registers num-of-registers
+		       special-registers volatile-register
 		       stack-pointer frame-pointer arch
 		       make-misc-immediate))))
 
@@ -43,7 +44,8 @@
 	((arch 'x86-64)
 	 (variable-size 8)
 	 (registers regs)
-	 (num-of-registers (vector-length regs))
+	 (num-of-registers (- (vector-length regs) 1))
+	 (volatile-register (- (vector-length regs) 1))
 	 (special-registers '#(rsp rbp))
 	 (stack-pointer 'rsp)
 	 (frame-pointer 'rbp)
@@ -57,7 +59,8 @@
 	((arch 'x86-32)
 	 (variable-size 4)
 	 (registers regs)
-	 (num-of-registers (vector-length regs))
+	 (num-of-registers (- (vector-length regs) 1))
+	 (volatile-register (- (vector-length regs) 1))
 	 (special-registers '#(esp ebp))
 	 (stack-pointer 'esp)
 	 (frame-pointer 'ebp)

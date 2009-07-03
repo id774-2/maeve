@@ -54,7 +54,7 @@
 	      )))
   (block (slot
 	  (es :struct :list
-	      :special-slot-handler (lambda (x) #?=(seqflat-all #?=x loop-s))
+	      :special-slot-handler (lambda (x) (seqflat x loop-s))
 	      )
 	  (default-succ :type :il-or-false)
 	  (opt-succ :type :il-or-false)

@@ -92,13 +92,14 @@
 		   ((memq sk general-slots)
 		    (receive (v pre) (%n v)
 		      (make-set!-vls
-		       :dists (list v)
-		       :src
-		       (make-mem
-			:base
-			(make-elm-addr
-			 :base %v
-			 :type-name tn :slot-name sk)))))
+		       :src v
+		       :dists
+		       (list
+			(make-mem
+			 :base
+			 (make-elm-addr
+			  :base %v
+			  :type-name tn :slot-name sk))))))
 		   ((eq? sk unfixed-slot)
 		    (make-seq
 		     :es
@@ -120,6 +121,7 @@
 	   spec)))
     (let1 cpx (make-allocate-cpx
 	       :unfixed-size unfixed-size :type-name tn)
+      #?=(car inits)
       (values
        (%make-seq
 	`(,@(flat-1 pres)
@@ -846,15 +848,15 @@
 		 "+")))
 	     (else (symbol-append "noname" (eq-hash x)))))
 	   (_ (when-debug:flowgraph (il->graphviz* #`",|omn|-1" x)))
+	   (_ (debug:il:pp #`"compile ,omn extra1" x))
 	   (x (closure-convert x))
-	   (_ (when-stop "closure-convert" x))
 	   (x (normalize&reduce-graph omn x))
 	   )
       (when-debug:flowgraph (il->graphviz* #`",|omn|-3" x))
       (when-stop "normalize-1" x)
       (with-output-to-mir-file
        omn (pretty-print x :use-global-table? #t))
-      (debug:il:pp #`"compile ,omn extra" x)
+      (debug:il:pp #`"compile ,omn extra2" x)
       (make-compile-result
        :omn omn
        :imported-modules
@@ -902,7 +904,7 @@
 			#f #f %make-lvar
 			(%module-core)
 			'closure
-			(list :lbl lbl :elms reqvars
+			(list :lbl (make-mem :base lbl) :elms reqvars
 			      :unfixed-size (make-scm-int (length reqvars))
 			      :length (make-scm-int (length reqvars))))))
 		   (hash-table-put! closure->lbl %allocate-cpx lbl)
@@ -914,35 +916,35 @@
 			      (make-with-mod
 			       :module %current-module :body x)
 			      x)))
-		   clo))))
+		   #?=clo))))
 	    (lvar
-	     (and-let* ((env (find (lambda (e) (member *self* e il:eqv?)) envs)))
-	       (update! (car extra-envs) (cut lset-adjoin eq? <> *self*)))
-	     (*update!*))))))
+	     (if (find (lambda (e) (member *self* e il:eqv?)) envs)
+	       (begin0
+		 (make-lvar)
+		 (update! (car extra-envs) (cut lset-adjoin eq? <> *self*)))
+		 (*update!*)))))))
     (update! (cunit:es-of* ne) (cut append (reverse! extra-toplevel) <>))
     (update! ne (cut normalize&reduce-graph #f <>))
-    (hash-table-for-each
-     (reach ne)
-     (lambda (stm rd)
-       (when (call? stm)
-       (format #t " * ~s\n" (il->sexp/ss stm))
-       (hash-table-for-each
-	rd (lambda (v es)
-	     (for-each
-	      (lambda (e)
-		(decompose-rd-elm e)
-		(format #t "  ~s = ~s\n" (il->sexp/ss dist)
-			(il->sexp/ss src)))
-	      es))))))
+;;     (hash-table-for-each
+;;      (reach ne)
+;;      (lambda (stm rd)
+;;        (when (call? stm)
+;;        (format #t " * ~s\n" (il->sexp/ss stm))
+;;        (hash-table-for-each
+;; 	rd (lambda (v es)
+;; 	     (for-each
+;; 	      (lambda (e)
+;; 		(decompose-rd-elm e)
+;; 		(format #t "  ~s = ~s\n" (il->sexp/ss dist)
+;; 			(il->sexp/ss src)))
+;; 	      es))))))
     (let1 %reach (reach ne)
-(macro-debug
       (mir-traverse
-       (use-debug:print-self?)
        (use-circular-graph?)
        (target ne)
        (handler
 	(call
-	 #?=(if (not (lvar? proc))
+	 (if (not (lvar? proc))
 	   (*update!*)
 	   (let1 prd (hash-table-get (hash-table-get %reach *self*) proc)
 	     (unless (length=1? prd)
@@ -952,17 +954,21 @@
 	      (if (not (and (allocate-cpx? src)
 			    (eq? 'closure (allocate-cpx:type-name-of src))))
 		(*update!*)
-		(make-seq
-		 :es
-		 `(,@(map
-		      (lambda (d s) (make-set!-vls :src s :dists (list d)))
-		      (lmd:extra-env-of
-		       (hash-table-get lbl->lmd (hash-table-get closure->lbl src)))
-		      (hash-table-get closure->reqvars src))
-		   ,(*update!*
-		     :proc (make-elm-addr
-			    :base proc
-			    :type-name 'closure :slot-name 'lbl)))))))))))))))
+		(let1 nproc (make-register :num (volatile-register))
+		  (make-seq
+		   :es
+		   `(,@(map
+			(lambda (d s) (make-set!-vls :src s :dists (list d)))
+			(lmd:extra-env-of
+			 (hash-table-get lbl->lmd (hash-table-get closure->lbl src)))
+			(hash-table-get closure->reqvars src))
+		     ,(make-set!-vls :dists (list nproc) :src proc)
+		     ,(*update!*
+		       :proc (make-mem
+			      :base
+			      (make-elm-addr
+			       :base nproc
+			       :type-name 'closure :slot-name 'lbl))))))))))))))))
 
 ;; (define (closure-convert e)
 ;;   (define (mark e)
