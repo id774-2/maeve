@@ -212,6 +212,7 @@
 		      width 0 `((0 flat ,pp)))
 		     port)
 	 (newline port)
-	 obj)))))
+	 obj))
+      (flush-all-ports))))
 
 (provide "maeve/lib.gauche/pp")

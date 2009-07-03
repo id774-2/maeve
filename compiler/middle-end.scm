@@ -848,7 +848,7 @@
 		 "+")))
 	     (else (symbol-append "noname" (eq-hash x)))))
 	   (_ (when-debug:flowgraph (il->graphviz* #`",|omn|-1" x)))
-	   (_ (debug:il:pp #`"compile ,omn extra1" x))
+	   ;;(_ (debug:il:pp #`"compile ,omn extra1" x))
 	   (x (closure-convert x))
 	   (x (normalize&reduce-graph omn x))
 	   )
@@ -873,7 +873,9 @@
 	 (parent-lmd-lvs '())
 	 (closure->lbl (make-hash-table 'eq?))
 	 (closure->reqvars (make-hash-table 'eq?))
-	 (lbl->lmd (make-hash-table 'eq?))
+	 (lbl->lmd-exvs (make-hash-table 'eq?))
+	 (lmd->exvs (make-hash-table 'eq?))
+	 (lvar-trans (make-hash-table 'eq?))
 	 (ne
 	  (mir-traverse
 	   (target e)
@@ -882,19 +884,21 @@
 	   (handler
 	    (lmd
 	     (define (%make-lvar)
-	       (rlet1 lv (make-lvar)
+	       (rlet1 lv (loop-s (make-lvar))
 		      (push! (cadr parent-lmd-lvs) lv)))
 	     (push! extra-envs (list #f))
-	     (push! parent-lmd-lvs local-vars)
+	     (push! parent-lmd-lvs (map loop-s local-vars))
 	     (let* ((es (map
 			 (*cut-loop* :self <> :envs (cons param envs))
 			 es))
 		    (reqvars (remove
 			      (lambda (e) (memq e param))
 			      (drop-right (pop! extra-envs) 1))))
-	       (define (%update) (*update!* :es es :extra-env reqvars
+	       (define (%update) (*update!* :es es 
+					    :param (append reqvars (map loop-s param))
 					    :local-vars (pop! parent-lmd-lvs)))
 	       (for-each (lambda (e) (push! (car extra-envs) e)) reqvars)
+	       (hash-table-put! lmd->exvs *self* reqvars)
 	       (if (parent-is-a-deflabel?)
 		 (%update)
 		 (let*-values
@@ -911,38 +915,52 @@
 		   (hash-table-put! closure->reqvars %allocate-cpx reqvars)
 		   (push! extra-toplevel
 			  (let1 x (make-deflabel :e (%update) :lbl lbl)
-			    (hash-table-put! lbl->lmd lbl *self*)
+			    (hash-table-put! lbl->lmd-exvs lbl reqvars)
 			    (if %current-module
 			      (make-with-mod
 			       :module %current-module :body x)
 			      x)))
-		   #?=clo))))
+		   clo))))
 	    (lvar
-	     (if (find (lambda (e) (member *self* e il:eqv?)) envs)
-	       (begin0
-		 (make-lvar)
-		 (update! (car extra-envs) (cut lset-adjoin eq? <> *self*)))
-		 (*update!*)))))))
+	     (hash-table-put! lvar-trans *self* (make-lvar))
+	     (when (find (lambda (e) (member *self* e il:eqv?)) envs)
+	       (update! (car extra-envs) (cut lset-adjoin eq? <> *self*)))
+	     (*update!*))))))
     (update! (cunit:es-of* ne) (cut append (reverse! extra-toplevel) <>))
     (update! ne (cut normalize&reduce-graph #f <>))
-;;     (hash-table-for-each
-;;      (reach ne)
-;;      (lambda (stm rd)
-;;        (when (call? stm)
-;;        (format #t " * ~s\n" (il->sexp/ss stm))
-;;        (hash-table-for-each
-;; 	rd (lambda (v es)
-;; 	     (for-each
-;; 	      (lambda (e)
-;; 		(decompose-rd-elm e)
-;; 		(format #t "  ~s = ~s\n" (il->sexp/ss dist)
-;; 			(il->sexp/ss src)))
-;; 	      es))))))
+    (set! ne
+	  (mir-traverse
+	   (target ne)
+	   (inherited-attr (parent-lmd '() *inherit*))
+	   (use-debug:print-self?)
+	   (handler
+	    (lmd
+	     (let1 nparam
+		 (let1 exvs (hash-table-get lmd->exvs *self* '())
+		   (map
+		    (lambda (v)
+		      (if (memq v exvs)
+			(hash-table-get lvar-trans v)
+			v))
+		    param))
+	       (*update!*
+		:param nparam :local-vars local-vars
+		:es (map (*cut-loop* :parent-lmd *self*
+				     :self <>)
+			 es))))
+	    (lvar
+	     (if (member #?=*self* (hash-table-get lmd->exvs parent-lmd))
+	       (hash-table-get lvar-trans *self*)
+	       (*update!*))))))
     (let1 %reach (reach ne)
       (mir-traverse
-       (use-circular-graph?)
        (target ne)
+       (inherited-attr (lvar-trans? #f #f))
        (handler
+	(lvar
+	 (if lvar-trans?
+	   (hash-table-get lvar-trans *self*)
+	   (*update!*)))
 	(call
 	 (if (not (lvar? proc))
 	   (*update!*)
@@ -957,18 +975,16 @@
 		(let1 nproc (make-register :num (volatile-register))
 		  (make-seq
 		   :es
-		   `(,@(map
-			(lambda (d s) (make-set!-vls :src s :dists (list d)))
-			(lmd:extra-env-of
-			 (hash-table-get lbl->lmd (hash-table-get closure->lbl src)))
-			(hash-table-get closure->reqvars src))
-		     ,(make-set!-vls :dists (list nproc) :src proc)
+		   `(,(make-set!-vls :dists (list nproc) :src proc)
 		     ,(*update!*
 		       :proc (make-mem
 			      :base
 			      (make-elm-addr
 			       :base nproc
-			       :type-name 'closure :slot-name 'lbl))))))))))))))))
+			       :type-name 'closure :slot-name 'lbl))
+		       :args (append (map (*cut-loop* :lvar-trans? #t :self <>)
+					  (hash-table-get closure->reqvars src))
+				     args)))))))))))))))
 
 ;; (define (closure-convert e)
 ;;   (define (mark e)

@@ -41,7 +41,6 @@
   (decompose-register-allocation-result (regalloca paramalloca e))
   (mir-traverse
    (target e)
-   (use-debug:print-self?)
    (use-circular-graph?)
    (inherited-attr
     (eplogue '() *inherit*)
